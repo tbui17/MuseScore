@@ -29,6 +29,7 @@
 
 #include "engraving/dom/masterscore.h"
 #include "../internal/braille.h"
+#include "../internal/brailleinput.h"
 
 using namespace mu::engraving;
 
@@ -241,4 +242,60 @@ TEST_F(Braille_Tests, hairpins) {
 }
 TEST_F(Braille_Tests, sectionBreak) {
     brailleSaveTest("testSectionBreak");
+}
+
+TEST(BrailleInputStateTests, hasPendingInputReflectsBufferContents)
+{
+    BrailleInputState state;
+
+    EXPECT_FALSE(state.hasPendingInput());
+
+    state.insertToBuffer("5");
+    EXPECT_TRUE(state.hasPendingInput());
+
+    state.resetBuffer();
+    EXPECT_FALSE(state.hasPendingInput());
+}
+
+TEST(BrailleInputStateTests, hasPendingInputIncludesTupletIndicator)
+{
+    BrailleInputState state;
+
+    state.setTupletIndicator(true);
+    EXPECT_TRUE(state.hasPendingInput());
+
+    state.reset();
+    EXPECT_FALSE(state.hasPendingInput());
+}
+
+TEST(BrailleInputStateTests, initializeClearsPendingTupletIndicator)
+{
+    BrailleInputState state;
+
+    state.setTupletIndicator(true);
+    state.insertToBuffer("5");
+
+    state.initialize();
+
+    EXPECT_FALSE(state.hasPendingInput());
+    EXPECT_FALSE(state.tupletIndicator());
+}
+
+TEST(BrailleInputStateTests, removeLastInputCellRemovesOnlyTheLastCell)
+{
+    BrailleInputState state;
+
+    state.insertToBuffer("5");
+    state.insertToBuffer("1456");
+    state.insertToBuffer("3");
+
+    EXPECT_EQ(state.buffer(), "5-1456-3");
+    EXPECT_TRUE(state.removeLastInputCell());
+    EXPECT_EQ(state.buffer(), "5-1456");
+    EXPECT_TRUE(state.removeLastInputCell());
+    EXPECT_EQ(state.buffer(), "5");
+    EXPECT_TRUE(state.removeLastInputCell());
+    EXPECT_EQ(state.buffer(), "");
+    EXPECT_FALSE(state.hasPendingInput());
+    EXPECT_FALSE(state.removeLastInputCell());
 }

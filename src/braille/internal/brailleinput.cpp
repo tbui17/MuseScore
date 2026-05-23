@@ -321,6 +321,8 @@ void BrailleInputState::initialize()
     _intervals.clear();
     _accord = false;
     _tuplet_number = -1;
+    _tuplet_duration = Duration(DurationType::V_INVALID);
+    _tuplet_indicator = false;
 }
 
 void BrailleInputState::reset()
@@ -351,6 +353,29 @@ void BrailleInputState::insertToBuffer(const QString code)
         _input_buffer.append("-").append(code);
         _code_num++;
     }
+}
+
+bool BrailleInputState::hasPendingInput() const
+{
+    return !_input_buffer.isEmpty() || _tuplet_indicator;
+}
+
+bool BrailleInputState::removeLastInputCell()
+{
+    if (_input_buffer.isEmpty()) {
+        return false;
+    }
+
+    int lastSeparatorIndex = _input_buffer.lastIndexOf("-");
+    if (lastSeparatorIndex == -1) {
+        _input_buffer = QString();
+        _code_num = 0;
+        return true;
+    }
+
+    _input_buffer.truncate(lastSeparatorIndex);
+    --_code_num;
+    return true;
 }
 
 BieSequencePatternType BrailleInputState::parseBraille(IntervalDirection direction)
@@ -495,7 +520,7 @@ BieSequencePatternType BrailleInputState::parseBraille(IntervalDirection directi
     return pattern->type();
 }
 
-QString BrailleInputState::buffer()
+QString BrailleInputState::buffer() const
 {
     return _input_buffer;
 }

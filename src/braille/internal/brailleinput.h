@@ -27,7 +27,7 @@
 
 #include "braillecode.h"
 #include "brailleinputparser.h"
-#include "brailletypes.h"
+#include "../brailletypes.h"
 
 namespace mu::engraving {
 enum class NoteGroup
@@ -54,7 +54,9 @@ public:
     void reset();
     void resetBuffer();
     void insertToBuffer(const QString);
-    QString buffer();
+    bool hasPendingInput() const;
+    bool removeLastInputCell();
+    QString buffer() const;
 
     BieSequencePatternType parseBraille(IntervalDirection direction);
 
