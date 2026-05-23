@@ -426,6 +426,173 @@ bool matchPattern(const std::string sequence, const std::string pattern)
     return true;
 }
 
+static void clearPendingBrailleInput(BrailleInputState* input)
+{
+    input->reset();
+    input->clearTuplet();
+}
+
+static void reparsePendingBrailleInput(BrailleInputState* input, const QString& buffer, bool tupletIndicator, IntervalDirection direction)
+{
+    clearPendingBrailleInput(input);
+
+    input->setTupletIndicator(tupletIndicator);
+
+    if (buffer.isEmpty()) {
+        return;
+    }
+
+    for (const QString& cell : buffer.split('-', Qt::SkipEmptyParts)) {
+        input->insertToBuffer(cell);
+    }
+    input->parseBraille(direction);
+}
+
+static QString durationAnnouncement(DurationType duration)
+{
+    switch (duration) {
+    case DurationType::V_LONG:
+        return muse::qtrc("braille/notation", "long");
+    case DurationType::V_BREVE:
+        return muse::qtrc("braille/notation", "breve");
+    case DurationType::V_WHOLE:
+        return muse::qtrc("braille/notation", "whole");
+    case DurationType::V_HALF:
+        return muse::qtrc("braille/notation", "half");
+    case DurationType::V_QUARTER:
+        return muse::qtrc("braille/notation", "quarter");
+    case DurationType::V_EIGHTH:
+        return muse::qtrc("braille/notation", "eighth");
+    case DurationType::V_16TH:
+        return muse::qtrc("braille/notation", "16th");
+    case DurationType::V_32ND:
+        return muse::qtrc("braille/notation", "32nd");
+    case DurationType::V_64TH:
+        return muse::qtrc("braille/notation", "64th");
+    case DurationType::V_128TH:
+        return muse::qtrc("braille/notation", "128th");
+    case DurationType::V_256TH:
+        return muse::qtrc("braille/notation", "256th");
+    case DurationType::V_512TH:
+        return muse::qtrc("braille/notation", "512th");
+    case DurationType::V_1024TH:
+        return muse::qtrc("braille/notation", "1024th");
+    default:
+        return QString();
+    }
+}
+
+static QString accidentalAnnouncement(mu::notation::AccidentalType accidental)
+{
+    switch (accidental) {
+    case mu::notation::AccidentalType::SHARP:
+        return muse::qtrc("braille/notation", "sharp");
+    case mu::notation::AccidentalType::FLAT:
+        return muse::qtrc("braille/notation", "flat");
+    case mu::notation::AccidentalType::NATURAL:
+        return muse::qtrc("braille/notation", "natural");
+    default:
+        return QString();
+    }
+}
+
+static QString dotsAnnouncement(const QString& pattern)
+{
+    QStringList cells;
+    for (const QString& cell : pattern.split('-', Qt::SkipEmptyParts)) {
+        QStringList dots;
+        for (const QChar dot : cell) {
+            if (dot >= '1' && dot <= '6') {
+                dots << QString(dot);
+            }
+        }
+        if (!dots.isEmpty()) {
+            cells << dots.join('-');
+        }
+    }
+
+    if (cells.isEmpty()) {
+        return QString();
+    }
+
+    return muse::qtrc("braille/notation", "Dots %1 entered; input pending").arg(cells.join(", "));
+}
+
+static QString semanticPendingAnnouncement(const QString& pattern)
+{
+    if (pattern == QString::fromStdString(Braille_Octave1.code)) {
+        return muse::qtrc("braille/notation", "Octave 1 pending");
+    }
+    if (pattern == QString::fromStdString(Braille_Octave2.code)) {
+        return muse::qtrc("braille/notation", "Octave 2 pending");
+    }
+    if (pattern == QString::fromStdString(Braille_Octave3.code)) {
+        return muse::qtrc("braille/notation", "Octave 3 pending");
+    }
+    if (pattern == QString::fromStdString(Braille_Octave4.code)) {
+        return muse::qtrc("braille/notation", "Octave 4 pending");
+    }
+    if (pattern == QString::fromStdString(Braille_Octave5.code)) {
+        return muse::qtrc("braille/notation", "Octave 5 pending");
+    }
+    if (pattern == QString::fromStdString(Braille_Octave6.code)) {
+        return muse::qtrc("braille/notation", "Octave 6 pending");
+    }
+    if (pattern == QString::fromStdString(Braille_Octave7.code)) {
+        return muse::qtrc("braille/notation", "Octave 7 pending");
+    }
+    if (pattern == QString::fromStdString(Braille_Octave8.code)) {
+        return muse::qtrc("braille/notation", "Octave 8 pending");
+    }
+    if (pattern == QString::fromStdString(Braille_SharpAccidental.code)) {
+        return muse::qtrc("braille/notation", "Sharp pending");
+    }
+    if (pattern == QString::fromStdString(Braille_FlatAccidental.code)) {
+        return muse::qtrc("braille/notation", "Flat pending");
+    }
+    if (pattern == QString::fromStdString(Braille_NaturalAccidental.code)) {
+        return muse::qtrc("braille/notation", "Natural pending");
+    }
+    if (pattern == QString::fromStdString(Braille_Dot.code)) {
+        return muse::qtrc("braille/notation", "Augmentation dot pending");
+    }
+
+    return QString();
+}
+
+static QString noteAnnouncement(BrailleInputState* input)
+{
+    QString noteName = fromNoteName(input->noteName());
+    const int octave = input->addedOctave() != -1 ? input->addedOctave() : input->octave();
+    if (octave != -1) {
+        noteName += QString::number(octave);
+    }
+
+    const QString accidental = accidentalAnnouncement(input->accidental());
+    if (!accidental.isEmpty()) {
+        noteName += " " + accidental;
+    }
+
+    if (input->dots() > 0) {
+        return muse::qtrc("braille/notation", "%1 dotted %2 note")
+               .arg(noteName, durationAnnouncement(input->getCloseDuration()));
+    }
+
+    return muse::qtrc("braille/notation", "%1 %2 note")
+           .arg(noteName, durationAnnouncement(input->getCloseDuration()));
+}
+
+static QString restAnnouncement(BrailleInputState* input)
+{
+    if (input->dots() > 0) {
+        return muse::qtrc("braille/notation", "dotted %1 rest")
+               .arg(durationAnnouncement(input->getCloseDuration()));
+    }
+
+    return muse::qtrc("braille/notation", "%1 rest")
+           .arg(durationAnnouncement(input->getCloseDuration()));
+}
+
 void NotationBraille::setKeys(const QString& sequence)
 {
     LOGD() << sequence;
@@ -448,8 +615,22 @@ void NotationBraille::setKeys(const QString& sequence)
         interaction()->selectLastElement();
     } else if (matchPattern(seq, "Ctrl+Home")) {
         interaction()->selectFirstElement();
+    } else if (seq == "Backspace" && isBrailleInputMode()) {
+        const bool tupletIndicator = brailleInput()->tupletIndicator();
+        if (brailleInput()->removeLastInputCell()) {
+            reparsePendingBrailleInput(brailleInput(), brailleInput()->buffer(), tupletIndicator, currentIntervalDirection());
+            accessibilityController()->announce(muse::qtrc("braille/notation", "Removed last braille cell"));
+        } else if (brailleInput()->tupletIndicator()) {
+            clearPendingBrailleInput(brailleInput());
+            accessibilityController()->announce(muse::qtrc("braille/notation", "Removed last braille cell"));
+        } else {
+            accessibilityController()->announce(muse::qtrc("braille/notation", "No pending braille input"));
+        }
     } else if (seq == "Delete") {
-        if (currentEngravingItem()) {
+        if (isBrailleInputMode() && brailleInput()->hasPendingInput()) {
+            clearPendingBrailleInput(brailleInput());
+            accessibilityController()->announce(muse::qtrc("braille/notation", "Pending braille input cleared"));
+        } else if (currentEngravingItem()) {
             interaction()->deleteSelection();
             if (!brailleInput()->intervals().empty()) {
                 brailleInput()->removeLastInterval();
@@ -482,12 +663,10 @@ void NotationBraille::setKeys(const QString& sequence)
     } else if (seq == "Space") {
         brailleInput()->reset();
     } else if (isBrailleInputMode() && !sequence.isEmpty()) {
-        QString pattern = parseBrailleKeyInput(sequence);
-        if (!pattern.isEmpty()) {
-            brailleInput()->insertToBuffer(pattern);
-        } else {
-            brailleInput()->insertToBuffer(sequence);
-        }
+        const QString pattern = parseBrailleKeyInput(sequence);
+        const bool isSixKeyChord = !pattern.isEmpty();
+        const QString insertedPattern = isSixKeyChord ? pattern : sequence;
+        brailleInput()->insertToBuffer(insertedPattern);
         LOGD() << brailleInput()->buffer();
         std::string braille = translate2Braille(brailleInput()->buffer().toStdString());
         BieRecognize(braille, brailleInput()->tupletIndicator());
@@ -590,6 +769,7 @@ void NotationBraille::setKeys(const QString& sequence)
             }
 
             playbackController()->playElements({ currentEngravingItem() });
+            accessibilityController()->announce(noteAnnouncement(brailleInput()));
             brailleInput()->reset();
             break;
         }
@@ -602,6 +782,7 @@ void NotationBraille::setKeys(const QString& sequence)
             }
             setInputNoteDuration(Duration(duration));
             interaction()->putRest(duration);
+            accessibilityController()->announce(restAnnouncement(brailleInput()));
             brailleInput()->reset();
             break;
         }
@@ -686,7 +867,16 @@ void NotationBraille::setKeys(const QString& sequence)
             break;
         }
         default: {
-            // TODO
+            if (isSixKeyChord) {
+                QString pendingAnnouncement = semanticPendingAnnouncement(insertedPattern);
+                if (pendingAnnouncement.isEmpty()) {
+                    pendingAnnouncement = dotsAnnouncement(insertedPattern);
+                }
+                if (!pendingAnnouncement.isEmpty()) {
+                    accessibilityController()->announce(pendingAnnouncement);
+                }
+            }
+            break;
         }
         }
     } else if (isBrailleInputMode() && !sequence.isEmpty()) {
@@ -863,23 +1053,32 @@ void NotationBraille::setMode(const BrailleMode mode)
 
 void NotationBraille::toggleMode()
 {
+    const bool discardPendingInput = isBrailleInputMode() && brailleInput()->hasPendingInput();
+
     switch ((BrailleMode)mode().val) {
     case BrailleMode::Undefined:
     case BrailleMode::Navigation:
         setMode(BrailleMode::BrailleInput);
         break;
     case BrailleMode::BrailleInput:
+        if (discardPendingInput) {
+            clearPendingBrailleInput(brailleInput());
+        }
         setMode(BrailleMode::Navigation);
         break;
     }
 
     dispatcher()->dispatch("note-input");
 
-    const QString stateTitle = interaction()->noteInput()->isNoteInputMode()
-                               //: Braille input with 6 keyboard keys (F,D,S & J,K,L) to represent the 6 dots in a braille cell.
-                               ? muse::qtrc("braille/notation", "Six-key input mode")
-                               //: Braille navigation.
-                               : muse::qtrc("braille/notation", "Navigation mode");
+    QString stateTitle = interaction()->noteInput()->isNoteInputMode()
+                         //: Braille input with 6 keyboard keys (F,D,S & J,K,L) to represent the 6 dots in a braille cell.
+                         ? muse::qtrc("braille/notation", "Six-key input mode")
+                         //: Braille navigation.
+                         : muse::qtrc("braille/notation", "Navigation mode");
+
+    if (discardPendingInput) {
+        stateTitle += muse::qtrc("braille/notation", "; pending braille input discarded");
+    }
 
     accessibilityController()->announce(stateTitle);
 }
