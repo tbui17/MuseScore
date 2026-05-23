@@ -117,10 +117,23 @@ StyledFlickable {
             [Qt.Key_Home, "Home"],
             [Qt.Key_End, "End"],
             [Qt.Key_Delete, "Delete"],
+            [Qt.Key_Backspace, "Backspace"],
             [Qt.Key_Escape, "Escape"],
             [Qt.Key_Minus, "Minus"],
             [Qt.Key_Plus, "Plus"],
          ])
+
+        function shouldHandleBrailleKey(event) {
+            if (!keyMap.has(event.key)) {
+                return false
+            }
+
+            if (event.key === Qt.Key_Backspace && brailleModel.mode !== 2) {
+                return false
+            }
+
+            return true
+        }
 
         cursorDelegate: Rectangle {
             id: brailleCursor
@@ -211,7 +224,7 @@ StyledFlickable {
 
         Keys.onShortcutOverride: function(event) {
 
-            if (keyMap.get(event.key) === "") {
+            if (!shouldHandleBrailleKey(event)) {
                 // Not interested in this key. Allow it to undergo normal
                 // shortcut processing (i.e. trigger an action, if it's been
                 // assigned one in Preferences that's valid in this context).
@@ -238,6 +251,10 @@ StyledFlickable {
                     event.accepted = true;
                     return;
                 }
+            }
+
+            if (!shouldHandleBrailleKey(event)) {
+                return;
             }
 
             // Note: Subsequent keys must be accepted in Keys.onShortcutOverride (above).
