@@ -3,6 +3,7 @@
 ## Build System
 
 - **Generator**: CMake + Ninja via `ninja_build.bat` (Windows) or `ninja_build.sh` (macOS/Linux)
+- **Windows wrapper**: `ninja_build.bat` sets up MSVC and calls `ninja_build.ps1`; `ninja_build.sh` remains the Unix-like implementation
 - **Build directory**: `builds/b` (RelWithDebInfo)
 - **Compiler**: MSVC 2022 (Windows), requires Visual Studio developer environment
 
@@ -16,7 +17,7 @@
 .\ninja_build.bat
 ```
 
-Auto-detects VS with `vswhere.exe`, runs `vcvars64.bat`, then delegates to `ninja_build.sh`. Creates `build.release`.
+Auto-detects VS with `vswhere.exe`, runs `vcvars64.bat`, then delegates to `ninja_build.ps1`. Creates `build.release`.
 
 ### Debug build (for stepping through code)
 

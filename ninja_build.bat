@@ -8,4 +8,4 @@ FOR /f "usebackq tokens=*" %%i in (`%VSWHERE% -latest -products * -requires Micr
 ECHO "VS_INSTALL_DIR: %VS_INSTALL_DIR%"
 CALL "%VS_INSTALL_DIR%\VC\Auxiliary\Build\vcvars64.bat"
 
-bash ./ninja_build.sh %*
+pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0ninja_build.ps1" %*
