@@ -28,6 +28,7 @@
 #include "io/path.h"
 #include "appshelltypes.h"
 #include "async/notification.h"
+#include "actions/actiontypes.h"
 
 namespace mu::appshell {
 class IAppShellConfiguration : MODULE_GLOBAL_INTERFACE
@@ -57,6 +58,9 @@ public:
     virtual muse::io::path_t startupScorePath() const = 0;
     virtual void setStartupScorePath(const muse::io::path_t& scorePath) = 0;
     virtual muse::async::Notification startupScorePathChanged() const = 0;
+
+    virtual muse::actions::ActionCodeList commandPaletteRecentActions() const = 0;
+    virtual void setCommandPaletteRecentActions(const muse::actions::ActionCodeList& actions) = 0;
 
     virtual std::string handbookUrl() const = 0;
     virtual std::string askForHelpUrl() const = 0;

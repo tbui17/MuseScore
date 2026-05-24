@@ -45,6 +45,7 @@ static const Settings::Key WELCOME_DIALOG_LAST_SHOWN_INDEX(module_name, "applica
 
 static const Settings::Key STARTUP_MODE_TYPE(module_name, "application/startup/modeStart");
 static const Settings::Key STARTUP_SCORE_PATH(module_name, "application/startup/startScore");
+static const Settings::Key COMMAND_PALETTE_RECENT_ACTIONS_KEY(module_name, "application/commandPalette/recentActions");
 
 static const std::string MUSESCORE_ONLINE_HANDBOOK_URL("https://handbook.musescore.org");
 
@@ -89,6 +90,8 @@ void AppShellConfiguration::init()
     settings()->valueChanged(STARTUP_SCORE_PATH).onReceive(this, [this](const Val&) {
         m_startupScorePathChanged.notify();
     });
+
+    settings()->setDefaultValue(COMMAND_PALETTE_RECENT_ACTIONS_KEY, Val(ValList()));
 
     fileSystem()->makePath(sessionDataPath());
 }
@@ -170,6 +173,32 @@ void AppShellConfiguration::setStartupScorePath(const muse::io::path_t& scorePat
 async::Notification AppShellConfiguration::startupScorePathChanged() const
 {
     return m_startupScorePathChanged;
+}
+
+muse::actions::ActionCodeList AppShellConfiguration::commandPaletteRecentActions() const
+{
+    muse::actions::ActionCodeList result;
+
+    for (const Val& value : settings()->value(COMMAND_PALETTE_RECENT_ACTIONS_KEY).toList()) {
+        muse::actions::ActionCode actionCode = value.toString();
+        if (!actionCode.empty()) {
+            result.push_back(actionCode);
+        }
+    }
+
+    return result;
+}
+
+void AppShellConfiguration::setCommandPaletteRecentActions(const muse::actions::ActionCodeList& actions)
+{
+    ValList values;
+    for (const muse::actions::ActionCode& actionCode : actions) {
+        if (!actionCode.empty()) {
+            values.emplace_back(Val(actionCode));
+        }
+    }
+
+    settings()->setSharedValue(COMMAND_PALETTE_RECENT_ACTIONS_KEY, Val(values));
 }
 
 std::string AppShellConfiguration::handbookUrl() const

@@ -258,6 +258,7 @@ MenuItem* AppMenuModel::makeEditMenu()
         makeMenuItem("notation-select-all"),
         makeMenuItem("notation-select-section"),
         makeMenuItem("find"),
+        makeMenuItem("command-palette"),
         makeSeparator(),
         makeMenuItem("preference-dialog", MenuItemRole::PreferencesRole)
     };

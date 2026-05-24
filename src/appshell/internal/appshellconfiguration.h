@@ -79,6 +79,9 @@ public:
     void setStartupScorePath(const muse::io::path_t& scorePath) override;
     muse::async::Notification startupScorePathChanged() const override;
 
+    muse::actions::ActionCodeList commandPaletteRecentActions() const override;
+    void setCommandPaletteRecentActions(const muse::actions::ActionCodeList& actions) override;
+
     std::string handbookUrl() const override;
     std::string askForHelpUrl() const override;
     std::string accessibilityStatementUrl() const override;

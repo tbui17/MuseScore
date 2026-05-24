@@ -77,6 +77,7 @@ void AppShellModule::resolveImports()
         ir->registerQmlUri(Uri("musescore://about/musicxml"), "MuseScore.AppShell", "AboutMusicXMLDialog");
         ir->registerQmlUri(Uri("musescore://welcomedialog"), "MuseScore.AppShell", "WelcomeDialog");
         ir->registerQmlUri(Uri("musescore://firstLaunchSetup"), "MuseScore.AppShell", "FirstLaunchSetupDialog");
+        ir->registerQmlUri(Uri("musescore://commandpalette"), "MuseScore.AppShell", "CommandPaletteDialog");
     }
 }
 

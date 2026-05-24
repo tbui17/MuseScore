@@ -67,6 +67,7 @@ void ApplicationActionController::init()
     dispatcher()->reg(this, "ask-help", this, &ApplicationActionController::openAskForHelpPage);
     dispatcher()->reg(this, "accessibility-statement", this, &ApplicationActionController::openAccessibilityStatementPage);
     dispatcher()->reg(this, "preference-dialog", this, &ApplicationActionController::openPreferencesDialog);
+    dispatcher()->reg(this, "command-palette", this, &ApplicationActionController::openCommandPalette);
 
     dispatcher()->reg(this, "revert-factory", this, &ApplicationActionController::revertToFactorySettings);
 
@@ -333,6 +334,11 @@ void ApplicationActionController::doOpenPreferencesDialog()
     }
 
     interactive()->open("muse://preferences");
+}
+
+void ApplicationActionController::openCommandPalette()
+{
+    interactive()->open("musescore://commandpalette");
 }
 
 void ApplicationActionController::revertToFactorySettings()

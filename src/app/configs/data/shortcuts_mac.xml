@@ -153,6 +153,11 @@
     <autorepeat>0</autorepeat>
     </SC>
   <SC>
+    <key>command-palette</key>
+    <seq>Ctrl+Shift+P</seq>
+    <autorepeat>0</autorepeat>
+  </SC>
+  <SC>
     <key>notation-paste-half</key>
     <seq>Meta+Shift+Q</seq>
     </SC>

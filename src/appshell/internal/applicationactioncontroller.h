@@ -108,6 +108,7 @@ private:
     void openAskForHelpPage();
     void openAccessibilityStatementPage();
     void openPreferencesDialog();
+    void openCommandPalette();
     void doOpenPreferencesDialog();
 
     void revertToFactorySettings();

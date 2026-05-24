@@ -28,6 +28,8 @@ qt_add_qml_module(appshell_qml
         aboutmodel.h
         appmenumodel.cpp
         appmenumodel.h
+        commandpalettemodel.cpp
+        commandpalettemodel.h
         DevTools/Settings/settingslistmodel.cpp
         DevTools/Settings/settingslistmodel.h
         FirstLaunchSetup/firstlaunchsetupmodel.cpp
@@ -50,6 +52,7 @@ qt_add_qml_module(appshell_qml
         welcomedialogmodel.h
     QML_FILES
         AboutDialog.qml
+        CommandPaletteDialog.qml
         AboutMusicXMLDialog.qml
         AppWindow.qml
         DevTools/CorruptScore/CorruptScoreDevTools.qml

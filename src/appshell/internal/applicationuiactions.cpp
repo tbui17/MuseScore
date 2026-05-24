@@ -229,6 +229,12 @@ const UiActionList ApplicationUiActions::m_actions = {
              TranslatableString("action", "&Preferences…"),
              TranslatableString("action", "Preferences")
              ),
+    UiAction("command-palette",
+             mu::context::UiCtxAny,
+             mu::context::CTX_ANY,
+             TranslatableString("action", "Command &palette…"),
+             TranslatableString("action", "Command palette")
+             ),
 
     UiAction("action://copy",
              { "action://notation/copy" },
