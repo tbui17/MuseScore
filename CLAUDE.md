@@ -4,7 +4,7 @@
 
 - **Generator**: CMake + Ninja via `ninja_build.bat` (Windows) or `ninja_build.sh` (macOS/Linux)
 - **Windows wrapper**: `ninja_build.bat` sets up MSVC and calls `ninja_build.ps1`; `ninja_build.sh` remains the Unix-like implementation
-- **Build directory**: `builds/b` (RelWithDebInfo)
+- **Build directory**: `build.release` (RelWithDebInfo), `build.debug` (Debug)
 - **Compiler**: MSVC 2022 (Windows), requires Visual Studio developer environment
 
 ## Building on Windows
@@ -30,10 +30,10 @@ Creates `build.debug` with no optimizations and assertions enabled.
 ### Targeted incremental build (fastest iteration on specific module)
 
 ```powershell
-cmd /c "call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" > nul 2>&1 && cmake --build builds\b --target <target> 2>&1"
+cmd /c "call ""C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"" > nul 2>&1 && cmake --build build.release --target <target> 2>&1"
 ```
 
-Reuses the existing `builds/b` tree. Only recompiles changed files.
+Reuses the existing `build.release` tree. Only recompiles changed files.
 
 ### Common targets
 
@@ -47,7 +47,7 @@ Reuses the existing `builds/b` tree. Only recompiles changed files.
 
 | Build type | Method | Optimizations | Assertions | Use case |
 |---|---|---|---|---|
-| `RelWithDebInfo` | `ninja_build.bat` (default) or `builds/b` | On | Off | Daily iteration |
+| `RelWithDebInfo` | `ninja_build.bat` (default) or `cmake -P build.cmake` | On | Off | Daily iteration |
 | `Debug` | `ninja_build.bat -t debug` | Off | On | Debugging, tracing bugs |
 
 ## Command Palette Feature
