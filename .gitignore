@@ -7,6 +7,7 @@
 .idea
 .qtcreator
 .vscode/
+.openchrome/
 /builds
 build
 /build_overrides.cmake
