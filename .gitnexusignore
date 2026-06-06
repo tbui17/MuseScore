@@ -1,0 +1,30 @@
+# Keep GitNexus focused on first-party MuseScore source instead of vendored or
+# generated code that dominates parser memory usage.
+
+# Vendored third-party code shown in analyzer OOM logs.
+muse/**/thirdparty/
+
+# Generated source and stub directories.
+**/gen/
+**/generated/
+
+# Build and dependency outputs. Some of these are also in .gitignore, but they
+# are repeated here to make GitNexus indexing behavior explicit.
+build/
+build.*/
+build-*/
+builds/
+build.release/
+build.debug/
+build.install/
+build.tooldata/
+build.qtc/
+dependencies/
+**/_deps/
+compile_commands.json
+.cache/
+
+# Optional lean-mode exclusions for large test/fixture areas.
+vtest/
+test/
+share/testflowscripts/
