@@ -40,6 +40,7 @@ static const ActionCode FULL_SCREEN_CODE("fullscreen");
 static const ActionCode TOGGLE_NAVIGATOR_ACTION_CODE("toggle-navigator");
 static const ActionCode TOGGLE_BRAILLE_ACTION_CODE("toggle-braille-panel");
 static const ActionCode TOGGLE_BRAILLE_SIX_KEY_INPUT_ACTION_CODE("toggle-braille-six-key-input");
+static const ActionCode CLEAR_BRAILLE_INPUT_BUFFER_ACTION_CODE("clear-braille-input-buffer");
 static const ActionCode TOGGLE_PERCUSSION_PANEL_ACTION_CODE("toggle-percussion-panel");
 
 const UiActionList ApplicationUiActions::m_actions = {
@@ -182,7 +183,13 @@ const UiActionList ApplicationUiActions::m_actions = {
              mu::context::CTX_ANY,
              TranslatableString("action", "Braille six-key input"),
              TranslatableString("action", "Use S, D, F, J, K, and L as braille dot keys in the score"),
+             IconCode::Code::BRAILLE,
              Checkable::Yes
+             ),
+    UiAction(CLEAR_BRAILLE_INPUT_BUFFER_ACTION_CODE,
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_FOCUSED,
+             TranslatableString("action", "Clear pending braille input")
              ),
 
     // Horizontal panels
