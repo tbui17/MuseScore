@@ -136,6 +136,11 @@ try {
     }
 
     if (Test-Path -LiteralPath $InstallRoot) {
+        $existingInstallRoot = Get-Item -LiteralPath $InstallRoot -Force
+        if (($existingInstallRoot.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to remove existing install root because it is a reparse point: $InstallRoot"
+        }
+
         Write-Log "Removing existing custom install: $InstallRoot"
         if ($PSCmdlet.ShouldProcess($InstallRoot, 'Remove existing custom install')) {
             Remove-Item -LiteralPath $InstallRoot -Recurse -Force
