@@ -11,9 +11,11 @@
 /builds
 build
 /build_overrides.cmake
-build.release
 build.debug
+build.release
 build.install
+build.artifacts
+dist/
 build.tooldata
 build.qtc
 build-*
@@ -24,7 +26,6 @@ win64build
 win64install
 build.xcode
 applebuild
-build.artifacts
 build.symbols
 vtest.artifacts
 MuseScorePortable
