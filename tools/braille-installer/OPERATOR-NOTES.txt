@@ -1,0 +1,36 @@
+MuseScore Braille Installer - Operator Notes
+
+Install command:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1
+
+Dry run command:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1 -WhatIf
+
+Uninstall command:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall-MuseScore-Braille.ps1
+
+Install behavior:
+- Requires 64-bit Windows.
+- Refuses to run if any MuseScoreStudio process is open.
+- Installs to %LOCALAPPDATA%\MuseScore-Braille.
+- Removes any existing custom install folder before extracting the new build.
+- Creates Desktop and Start Menu shortcuts named "MuseScore Braille Test Build".
+- Does not launch MuseScore after install.
+- Does not change file associations.
+- Does not delete normal MuseScore settings, scores, plugins, templates, or workspaces.
+
+Post-install smoke test:
+1. Launch "MuseScore Braille Test Build" from the shortcut.
+2. Open or create a simple score.
+3. Confirm the six-key braille toggle is visible in the note-input toolbar.
+4. Enable six-key input.
+5. Enter C + 3rd as a two-cell chord:
+   first chord: F+J+K+L
+   second chord: S+J+L
+6. Type a partial braille cell, then press semicolon.
+7. Confirm the partial input clears and normal entry can continue.
+8. Close MuseScore.
+
+Support files:
+- Installer log: %LOCALAPPDATA%\MuseScore-Braille-Install.log
+- Install metadata: %LOCALAPPDATA%\MuseScore-Braille\INSTALL-METADATA.txt
