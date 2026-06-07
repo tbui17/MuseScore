@@ -50,8 +50,8 @@ function Assert-Payload {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [System.IO.Compression.ZipFile]::OpenRead($PayloadZip)
     try {
-        $normalizedExpected = $ExpectedExeRelativePath.Replace('\\', '/')
-        $entry = $zip.Entries | Where-Object { $_.FullName.Replace('\\', '/') -eq $normalizedExpected } | Select-Object -First 1
+        $normalizedExpected = $ExpectedExeRelativePath.Replace('\', '/')
+        $entry = $zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $normalizedExpected } | Select-Object -First 1
         if (-not $entry) {
             throw "Payload ZIP does not contain expected executable: $ExpectedExeRelativePath"
         }
