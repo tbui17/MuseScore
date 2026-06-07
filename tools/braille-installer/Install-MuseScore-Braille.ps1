@@ -1,5 +1,12 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
-param()
+param(
+    [string]$Owner = 'tbui17',
+    [string]$Repo = 'MuseScore',
+    [string]$ReleaseTag = '',
+    [string]$AssetPattern = 'MuseScore-Braille-Installer-*.zip',
+    [string]$DownloadUrl = '',
+    [string]$WorkRoot = ''
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -65,6 +72,101 @@ function Assert-Payload {
     }
 }
 
+function Get-ReleaseAsset {
+    param(
+        [Parameter(Mandatory = $true)][string]$Owner,
+        [Parameter(Mandatory = $true)][string]$Repo,
+        [string]$ReleaseTag,
+        [Parameter(Mandatory = $true)][string]$AssetPattern
+    )
+
+    $releaseUri = if ($ReleaseTag) {
+        "https://api.github.com/repos/$Owner/$Repo/releases/tags/$ReleaseTag"
+    } else {
+        "https://api.github.com/repos/$Owner/$Repo/releases/latest"
+    }
+
+    Write-Host "Reading release metadata: $releaseUri"
+    $release = Invoke-RestMethod -Uri $releaseUri -Headers @{ 'User-Agent' = 'MuseScore-Braille-Installer' }
+    $asset = $release.assets | Where-Object { $_.name -like $AssetPattern } | Select-Object -First 1
+    if (-not $asset) {
+        throw "No release asset matching '$AssetPattern' was found in $Owner/$Repo."
+    }
+
+    return $asset
+}
+
+function Remove-DirectoryIfSafe {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $item = Get-Item -LiteralPath $Path -Force
+    if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing to remove reparse-point directory: $Path"
+    }
+
+    Remove-Item -LiteralPath $Path -Recurse -Force
+}
+
+function Resolve-PayloadFromGitHub {
+    param(
+        [Parameter(Mandatory = $true)][string]$WorkRoot,
+        [Parameter(Mandatory = $true)][string]$Owner,
+        [Parameter(Mandatory = $true)][string]$Repo,
+        [string]$ReleaseTag,
+        [Parameter(Mandatory = $true)][string]$AssetPattern,
+        [string]$DownloadUrl
+    )
+
+    $assetName = 'MuseScore-Braille-Installer.zip'
+    $assetUrl = $DownloadUrl
+    if (-not $assetUrl) {
+        $asset = Get-ReleaseAsset -Owner $Owner -Repo $Repo -ReleaseTag $ReleaseTag -AssetPattern $AssetPattern
+        $assetName = $asset.name
+        $assetUrl = $asset.browser_download_url
+    }
+
+    if (-not $assetUrl) {
+        throw 'Could not determine release asset download URL.'
+    }
+
+    $zipPath = Join-Path $WorkRoot $assetName
+    $extractRoot = Join-Path $WorkRoot 'extracted'
+
+    Write-Host "Local payload not found. Downloading installer package from GitHub."
+    Write-Host "Download URL: $assetUrl"
+    Write-Host "Working folder: $WorkRoot"
+
+    if (Test-Path -LiteralPath $WorkRoot) {
+        if ($PSCmdlet.ShouldProcess($WorkRoot, 'Remove previous download working folder')) {
+            Remove-DirectoryIfSafe -Path $WorkRoot
+        }
+    }
+
+    if ($PSCmdlet.ShouldProcess($WorkRoot, 'Create download working folder')) {
+        New-Item -ItemType Directory -Path $WorkRoot -Force | Out-Null
+    }
+
+    if ($PSCmdlet.ShouldProcess($zipPath, 'Download installer package')) {
+        Invoke-WebRequest -Uri $assetUrl -OutFile $zipPath -UseBasicParsing
+    }
+
+    if ($PSCmdlet.ShouldProcess($extractRoot, 'Extract installer package')) {
+        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force
+    }
+
+    if ($WhatIfPreference) {
+        Write-Host 'WhatIf: GitHub download and package extraction were simulated.'
+        return $null
+    }
+
+    $payload = Get-ChildItem -LiteralPath $extractRoot -Filter 'MuseScore-Braille.zip' -Recurse -File | Where-Object { $_.FullName -match '[\\/]payload[\\/]MuseScore-Braille\.zip$' } | Select-Object -First 1
+    if (-not $payload) {
+        throw 'Downloaded package did not contain payload\MuseScore-Braille.zip.'
+    }
+
+    return $payload.FullName
+}
+
 function New-Shortcut {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -91,17 +193,23 @@ try {
     Assert-64BitWindows
 
     $localAppData = $env:LOCALAPPDATA
+    $tempPath = $env:TEMP
     $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     $programsPath = [Environment]::GetFolderPath('Programs')
 
     Assert-RequiredPath -Name 'LOCALAPPDATA' -Value $localAppData
+    Assert-RequiredPath -Name 'TEMP' -Value $tempPath
     Assert-RequiredPath -Name 'Script root' -Value $ScriptRoot
     Assert-RequiredPath -Name 'Desktop' -Value $desktopPath
     Assert-RequiredPath -Name 'Start Menu Programs' -Value $programsPath
 
     $InstallRoot = Join-Path $localAppData 'MuseScore-Braille'
     $LogPath = Join-Path $localAppData 'MuseScore-Braille-Install.log'
+    if ([string]::IsNullOrWhiteSpace($WorkRoot)) {
+        $WorkRoot = Join-Path $tempPath 'MuseScore-Braille-GitHub-Install'
+    }
+
     $PayloadZip = Join-Path $ScriptRoot 'payload\MuseScore-Braille.zip'
     $InstalledExe = Join-Path $InstallRoot $ExpectedExeRelativePath
     $MetadataPath = Join-Path $InstallRoot 'INSTALL-METADATA.txt'
@@ -121,6 +229,17 @@ try {
     }
     Write-Log "Installing $PackageName..."
     Write-Log 'Validated 64-bit Windows.'
+
+    if (-not (Test-Path -LiteralPath $PayloadZip -PathType Leaf)) {
+        $downloadedPayload = Resolve-PayloadFromGitHub -WorkRoot $WorkRoot -Owner $Owner -Repo $Repo -ReleaseTag $ReleaseTag -AssetPattern $AssetPattern -DownloadUrl $DownloadUrl
+        if ($downloadedPayload) {
+            $PayloadZip = $downloadedPayload
+            $ScriptRoot = Split-Path -Parent (Split-Path -Parent $PayloadZip)
+        } elseif ($WhatIfPreference) {
+            Write-Host 'WhatIf: install stopped after simulated GitHub package download.'
+            return
+        }
+    }
 
     Assert-Payload
     Write-Log "Validated payload: $PayloadZip"
