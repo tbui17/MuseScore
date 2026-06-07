@@ -6,8 +6,16 @@ Recommended GitHub release flow:
 3. Run the installer script to download the latest matching release ZIP, extract it, and start setup:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1
 
+If PowerShell 7 is installed, opening pwsh and running the script directly is also supported:
+.\Install-MuseScore-Braille.ps1
+
+The powershell.exe form is documented because Windows includes it by default and `-ExecutionPolicy Bypass` applies only to that one process.
+
 GitHub download dry run command:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1 -WhatIf
+
+PowerShell 7 dry run command:
+.\Install-MuseScore-Braille.ps1 -WhatIf
 
 If you already have the ZIP, extract it and use the local commands below.
 
