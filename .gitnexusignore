@@ -1,31 +1,106 @@
-# Keep GitNexus focused on first-party MuseScore source instead of vendored or
-# generated code that dominates parser memory usage.
-
-# Vendored third-party code shown in analyzer OOM logs.
-muse/**/thirdparty/
-
-# Generated source and stub directories.
-**/gen/
-**/generated/
-
-# Build and dependency outputs. Some of these are also in .gitignore, but they
-# are repeated here to make GitNexus indexing behavior explicit.
+# ── Build outputs ──────────────────────────────────────────────
 build/
-build.*/
-build-*/
-builds/
-build.release/
 build.debug/
+build.release/
 build.install/
-build.tooldata/
-build.qtc/
-dependencies/
-**/_deps/
-compile_commands.json
-.cache/
+builds/
+*.obj
 
-# Optional lean-mode exclusions for large test/fixture areas.
-vtest/
+# ── Score data files (not C++ source) ──────────────────────────
 test/
+vtest/
+demos/
+sandbox/
+src/importexport/*/tests/data/
+
+# ── Qt translation XML (NOT TypeScript) ────────────────────────
+share/locale/
+
+# ── Thirdparty / vendor ────────────────────────────────────────
+**/thirdparty/
+**/3rdparty/
+dependencies/
+
+# ── Pre-built binaries ────────────────────────────────────────
+muse/framework/diagnostics/crashpad_handler/
+
+# ── Fonts (OTF/TTF/SFD are binary-heavy) ──────────────────────
+fonts/
+
+# ── Documentation / meta ───────────────────────────────────────
+docs/
+*.md
+LICENSE*
+
+# ── CI / build tooling ────────────────────────────────────────
+buildscripts/
+tools/
+hooks/
+.github/
+
+# ── Extensions / plugins (JS, not C++) ─────────────────────────
+share/extensions/
+share/plugins/
+
+# ── Sound / style / template data ──────────────────────────────
+share/sound/
+share/styles/
+share/templates/
 share/testflowscripts/
-src/engraving/**
+share/wallpapers/
+share/workspaces/
+
+# ── Stubs / test harness ──────────────────────────────────────
+src/stubs/
+muse/framework/stubs/
+muse/framework/testflow/
+muse/framework/testing/
+muse/framework/tours/
+muse/framework/learn/
+
+# ── Score file formats (mscx/mscz/mss) ────────────────────────
+*.mscz
+*.mscx
+*.mss
+*.enigmaxml
+
+# ── Braille thirdparty tables ──────────────────────────────────
+*.ctb
+*.dic
+
+# ── Font files ─────────────────────────────────────────────────
+*.otf
+*.ttf
+*.sfd
+
+# ── Images ─────────────────────────────────────────────────────
+*.png
+*.svg
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.bmp
+
+# ── Web / doc formats ──────────────────────────────────────────
+*.html
+*.css
+
+# ── Build/config templates ─────────────────────────────────────
+*.sh
+*.bat
+*.ps1
+*.py
+*.yml
+*.yaml
+*.in
+configure
+configure.ac
+ChangeLog
+
+# ── Data / metadata (not source) ──────────────────────────────
+*.json
+*.xml
+*.txt
+*.def
+*.ui

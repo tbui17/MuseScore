@@ -71,12 +71,13 @@ std::clamp(index, 0, static_cast<int>(m_items.size()) - 1)
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze --index-only` in terminal first.
+This project is indexed by GitNexus as **MuseScore**. Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
 ## Always Do
 
 - **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
@@ -91,10 +92,10 @@ std::clamp(index, 0, static_cast<int>(m_items.size()) - 1)
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/project-gaffer/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/project-gaffer/clusters` | All functional areas |
-| `gitnexus://repo/project-gaffer/processes` | All execution flows |
-| `gitnexus://repo/project-gaffer/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/MuseScore/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/MuseScore/clusters` | All functional areas |
+| `gitnexus://repo/MuseScore/processes` | All execution flows |
+| `gitnexus://repo/MuseScore/process/{name}` | Step-by-step execution trace |
 
 ## CLI
 

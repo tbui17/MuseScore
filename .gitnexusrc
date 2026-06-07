@@ -1,7 +1,4 @@
 {
-  "skipContextFiles": true, 
-  "skipSkills": true, 
-  "embeddings": true,
-  "workerTimeout": 600,
-  "workers": 16
+  "skipContextFiles": true,
+  "skipSkills": true
 }
