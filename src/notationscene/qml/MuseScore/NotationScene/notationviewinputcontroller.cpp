@@ -81,6 +81,7 @@ void NotationViewInputController::init()
         dispatcher()->reg(this, "zoom-two-pages", this, &NotationViewInputController::zoomToTwoPages);
         dispatcher()->reg(this, "zoom100", [this]() { setZoom(100, findZoomFocusPoint()); });
         dispatcher()->reg(this, "zoom-x-percent", [this](const ActionData& args) { setZoom(args.arg<int>(0), findZoomFocusPoint()); });
+        dispatcher()->reg(this, "clear-braille-input-buffer", this, &NotationViewInputController::clearBrailleInputBuffer);
 
         if (brailleConfiguration()) {
             brailleConfiguration()->sixKeyInputEnabledChanged().onNotify(this, [this]() {
@@ -1511,6 +1512,33 @@ void NotationViewInputController::clearBrailleSixKeyState()
     m_brailleSixKeyChordInvalidated = false;
 }
 
+bool NotationViewInputController::shouldClearBraillePendingInput(QKeyEvent* event) const
+{
+    if (!event || event->isAutoRepeat()) {
+        return false;
+    }
+
+    if (!brailleConfiguration() || !brailleConfiguration()->sixKeyInputEnabled() || !notationBraille()) {
+        return false;
+    }
+
+    return event->modifiers() != Qt::NoModifier || brailleSixKeyName(event->key()).isEmpty();
+}
+
+void NotationViewInputController::clearBrailleSixKeyInputState()
+{
+    clearBrailleSixKeyState();
+
+    if (notationBraille()) {
+        notationBraille()->clearPendingInput();
+    }
+}
+
+void NotationViewInputController::clearBrailleInputBuffer()
+{
+    clearBrailleSixKeyInputState();
+}
+
 void NotationViewInputController::focusChanged(bool focused)
 {
     if (!focused) {
@@ -1522,7 +1550,7 @@ bool NotationViewInputController::ensureBrailleSixKeyNoteInputStarted() const
 {
     INotationInteractionPtr interaction = viewInteraction();
     INotationNoteInputPtr noteInput = interaction ? interaction->noteInput() : nullptr;
-    if (!noteInput) {
+    if (!noteInput || !notationBraille()) {
         return false;
     }
 
@@ -1530,7 +1558,15 @@ bool NotationViewInputController::ensureBrailleSixKeyNoteInputStarted() const
         noteInput->startNoteInput(configuration()->defaultNoteInputMethod(), false);
     }
 
-    return noteInput->isNoteInputMode();
+    if (!noteInput->isNoteInputMode()) {
+        return false;
+    }
+
+    if (!notationBraille()->isBrailleInputMode()) {
+        notationBraille()->setMode(BrailleMode::BrailleInput);
+    }
+
+    return true;
 }
 
 void NotationViewInputController::handleBrailleSixKeyPress(QKeyEvent* event)
@@ -1582,8 +1618,13 @@ void NotationViewInputController::handleBrailleSixKeyRelease(QKeyEvent* event)
 bool NotationViewInputController::shortcutOverrideEvent(QKeyEvent* event)
 {
     auto key = event->key();
+    const bool canHandleBrailleInput = canHandleBrailleSixKeyInput(event);
 
-    if (canHandleBrailleSixKeyInput(event)) {
+    if (shouldClearBraillePendingInput(event)) {
+        clearBrailleSixKeyInputState();
+    }
+
+    if (canHandleBrailleInput) {
         event->accept();
         return true;
     }
@@ -1611,8 +1652,13 @@ bool NotationViewInputController::shortcutOverrideEvent(QKeyEvent* event)
 void NotationViewInputController::keyPressEvent(QKeyEvent* event)
 {
     auto key = event->key();
+    const bool canHandleBrailleInput = canHandleBrailleSixKeyInput(event);
 
-    if (canHandleBrailleSixKeyInput(event)) {
+    if (shouldClearBraillePendingInput(event)) {
+        clearBrailleSixKeyInputState();
+    }
+
+    if (canHandleBrailleInput) {
         handleBrailleSixKeyPress(event);
         updateShadowNotePopupVisibility(true);
         return;

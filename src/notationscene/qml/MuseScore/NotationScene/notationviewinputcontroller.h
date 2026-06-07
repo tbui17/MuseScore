@@ -141,6 +141,7 @@ public:
     void keyPressEvent(QKeyEvent* event);
     void keyReleaseEvent(QKeyEvent* event);
     void inputMethodEvent(QInputMethodEvent* event);
+    void clearBrailleInputBuffer();
 
     bool canHandleInputMethodQuery(Qt::InputMethodQuery query) const;
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const;
@@ -221,6 +222,8 @@ private:
     void handleBrailleSixKeyRelease(QKeyEvent* event);
     bool ensureBrailleSixKeyNoteInputStarted() const;
     void clearBrailleSixKeyState();
+    bool shouldClearBraillePendingInput(QKeyEvent* event) const;
+    void clearBrailleSixKeyInputState();
     static QString brailleSixKeyName(int key);
 
     bool tryPercussionShortcut(QKeyEvent* event);

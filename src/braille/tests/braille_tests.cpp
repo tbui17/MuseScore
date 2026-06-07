@@ -22,15 +22,26 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+#include <vector>
+
 #include <QFile>
 
 #include "engraving/tests/utils/scorerw.h"
 #include "engraving/tests/utils/scorecomp.h"
 
+#include "engraving/dom/chord.h"
 #include "engraving/dom/masterscore.h"
+#include "engraving/dom/measure.h"
+#include "engraving/dom/note.h"
+#include "engraving/dom/segment.h"
 #include "../internal/braille.h"
 #include "../internal/brailleconfiguration.h"
 #include "../internal/brailleinput.h"
+
+#define private public
+#include "../internal/notationbraille.h"
+#undef private
 
 using namespace mu::engraving;
 
@@ -68,6 +79,26 @@ static bool saveCompareBrailleScore(MasterScore* score, const String& saveName, 
 {
     EXPECT_TRUE(saveBraille(score, saveName));
     return ScoreComp::compareFiles(saveName,  ScoreRW::rootPath() + u"/" + compareWithLocalPath);
+}
+
+static std::vector<Note*> firstNotes(MasterScore* score, size_t count)
+{
+    std::vector<Note*> result;
+
+    for (Segment* segment = score->firstSegment(SegmentType::ChordRest); segment && result.size() < count;
+         segment = segment->next1(SegmentType::ChordRest)) {
+        ChordRest* chordRest = segment->nextChordRest(0);
+        if (!chordRest || !chordRest->isChord()) {
+            continue;
+        }
+
+        const std::vector<Note*>& notes = toChord(chordRest)->notes();
+        if (!notes.empty()) {
+            result.push_back(notes.front());
+        }
+    }
+
+    return result;
 }
 
 void Braille_Tests::brailleSaveTest(const char* file)
@@ -245,6 +276,63 @@ TEST_F(Braille_Tests, sectionBreak) {
     brailleSaveTest("testSectionBreak");
 }
 
+TEST_F(Braille_Tests, shortSlurToEarlierNoteIsIgnored)
+{
+    std::unique_ptr<MasterScore> score(ScoreRW::readScore(BRAILLE_DIR + u"testPitches.mscx", false));
+    ASSERT_TRUE(score);
+    fixupScore(score.get());
+    score->doLayout();
+
+    std::vector<Note*> notes = firstNotes(score.get(), 2);
+    ASSERT_EQ(notes.size(), 2);
+
+    auto iocCtx = std::make_shared<muse::modularity::Context>(1);
+    NotationBraille notationBraille(iocCtx);
+    notationBraille.brailleInput()->setSlurStartNote(notes[1]);
+    notationBraille.current_engraving_item = notes[0];
+
+    EXPECT_FALSE(notationBraille.addSlur());
+    EXPECT_EQ(notationBraille.brailleInput()->slurStartNote(), nullptr);
+}
+
+TEST_F(Braille_Tests, longSlurToEarlierNoteIsIgnored)
+{
+    std::unique_ptr<MasterScore> score(ScoreRW::readScore(BRAILLE_DIR + u"testPitches.mscx", false));
+    ASSERT_TRUE(score);
+    fixupScore(score.get());
+    score->doLayout();
+
+    std::vector<Note*> notes = firstNotes(score.get(), 2);
+    ASSERT_EQ(notes.size(), 2);
+
+    auto iocCtx = std::make_shared<muse::modularity::Context>(1);
+    NotationBraille notationBraille(iocCtx);
+    notationBraille.brailleInput()->setLongSlurStartNote(notes[1]);
+    notationBraille.current_engraving_item = notes[0];
+
+    EXPECT_FALSE(notationBraille.addLongSlur());
+    EXPECT_EQ(notationBraille.brailleInput()->longSlurStartNote(), nullptr);
+}
+
+TEST_F(Braille_Tests, tieToEarlierNoteIsIgnored)
+{
+    std::unique_ptr<MasterScore> score(ScoreRW::readScore(BRAILLE_DIR + u"testPitches.mscx", false));
+    ASSERT_TRUE(score);
+    fixupScore(score.get());
+    score->doLayout();
+
+    std::vector<Note*> notes = firstNotes(score.get(), 2);
+    ASSERT_EQ(notes.size(), 2);
+
+    auto iocCtx = std::make_shared<muse::modularity::Context>(1);
+    NotationBraille notationBraille(iocCtx);
+    notationBraille.brailleInput()->setTieStartNote(notes[1]);
+    notationBraille.current_engraving_item = notes[0];
+
+    EXPECT_FALSE(notationBraille.addTie());
+    EXPECT_EQ(notationBraille.brailleInput()->tieStartNote(), nullptr);
+}
+
 TEST(BrailleInputStateTests, hasPendingInputReflectsBufferContents)
 {
     BrailleInputState state;
@@ -299,6 +387,18 @@ TEST(BrailleInputStateTests, removeLastInputCellRemovesOnlyTheLastCell)
     EXPECT_EQ(state.buffer(), "");
     EXPECT_FALSE(state.hasPendingInput());
     EXPECT_FALSE(state.removeLastInputCell());
+}
+
+TEST_F(Braille_Tests, clearPendingInputResetsInputBuffer)
+{
+    NotationBraille notationBraille(std::make_shared<muse::modularity::Context>(1));
+
+    notationBraille.brailleInput()->insertToBuffer("1");
+    ASSERT_TRUE(notationBraille.brailleInput()->hasPendingInput());
+
+    notationBraille.clearPendingInput();
+
+    EXPECT_FALSE(notationBraille.brailleInput()->hasPendingInput());
 }
 
 TEST(BrailleConfigurationTests, sixKeyInputEnabledDefaultsToFalseAndCanBeChanged)

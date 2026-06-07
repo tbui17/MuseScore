@@ -37,6 +37,7 @@
 #include "notationscene/qml/MuseScore/NotationScene/notationviewinputcontroller.h"
 
 using ::testing::_;
+using ::testing::Mock;
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::ReturnRef;
@@ -89,6 +90,7 @@ public:
     MOCK_METHOD(void, setCursorPosition, (const int), (override));
     MOCK_METHOD(void, setCurrentItemPosition, (const int, const int), (override));
     MOCK_METHOD(void, setKeys, (const QString&), (override));
+    MOCK_METHOD(void, clearPendingInput, (), (override));
     MOCK_METHOD(void, setMode, (const BrailleMode), (override));
     MOCK_METHOD(void, toggleMode, (), (override));
     MOCK_METHOD(bool, isNavigationMode, (), (override));
@@ -1184,6 +1186,50 @@ TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ModifiedTrackedRelea
     m_controller->keyReleaseEvent(jRelease);
 }
 
+TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ModifiedShortcutDuringPartialChord_ClearsStateNoDispatch)
+{
+    ON_CALL(*m_brailleConfiguration, sixKeyInputEnabled()).WillByDefault(Return(true));
+    ON_CALL(*m_noteInput, isNoteInputMode()).WillByDefault(Return(true));
+
+    EXPECT_CALL(*m_notationBraille, setKeys(_)).Times(0);
+
+    QKeyEvent* sPress = make_keyEvent(QEvent::KeyPress, Qt::Key_S);
+    m_controller->keyPressEvent(sPress);
+    EXPECT_TRUE(sPress->isAccepted());
+
+    QKeyEvent* modifiedShortcut = make_keyEvent(QEvent::ShortcutOverride, Qt::Key_K, Qt::ControlModifier);
+    bool accepted = m_controller->shortcutOverrideEvent(modifiedShortcut);
+    EXPECT_FALSE(accepted);
+    EXPECT_FALSE(modifiedShortcut->isAccepted());
+
+    QKeyEvent* kRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_K);
+    m_controller->keyReleaseEvent(kRelease);
+    EXPECT_TRUE(kRelease->isAccepted());
+
+    QKeyEvent* sRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_S);
+    m_controller->keyReleaseEvent(sRelease);
+    EXPECT_TRUE(sRelease->isAccepted());
+}
+
+TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_NonBrailleKeyPressDuringPartialChord_ClearsStateNoDispatch)
+{
+    ON_CALL(*m_brailleConfiguration, sixKeyInputEnabled()).WillByDefault(Return(true));
+    ON_CALL(*m_noteInput, isNoteInputMode()).WillByDefault(Return(true));
+
+    EXPECT_CALL(*m_notationBraille, setKeys(_)).Times(0);
+
+    QKeyEvent* sPress = make_keyEvent(QEvent::KeyPress, Qt::Key_S);
+    m_controller->keyPressEvent(sPress);
+    EXPECT_TRUE(sPress->isAccepted());
+
+    QKeyEvent* aPress = make_keyEvent(QEvent::KeyPress, Qt::Key_A);
+    m_controller->keyPressEvent(aPress);
+
+    QKeyEvent* sRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_S);
+    m_controller->keyReleaseEvent(sRelease);
+    EXPECT_TRUE(sRelease->isAccepted());
+}
+
 TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_InactiveAutoRepeatRelease_AcceptsNonMutating)
 {
     ON_CALL(*m_brailleConfiguration, sixKeyInputEnabled()).WillByDefault(Return(true));
@@ -1238,6 +1284,80 @@ TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_Enabled_StartsNoteIn
 
     QKeyEvent* jRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_J);
     m_controller->keyReleaseEvent(jRelease);
+}
+
+TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_Enabled_EntersBrailleInputModeBeforeDispatchingChord)
+{
+    ON_CALL(*m_brailleConfiguration, sixKeyInputEnabled()).WillByDefault(Return(true));
+    ON_CALL(*m_noteInput, isNoteInputMode()).WillByDefault(Return(true));
+    ON_CALL(*m_notationBraille, isBrailleInputMode()).WillByDefault(Return(false));
+
+    {
+        InSequence seq;
+        EXPECT_CALL(*m_notationBraille, setMode(BrailleMode::BrailleInput)).Times(1);
+        EXPECT_CALL(*m_notationBraille, setKeys(QString("F"))).Times(1);
+    }
+
+    QKeyEvent* fPress = make_keyEvent(QEvent::KeyPress, Qt::Key_F);
+    m_controller->keyPressEvent(fPress);
+
+    QKeyEvent* fRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_F);
+    m_controller->keyReleaseEvent(fRelease);
+}
+
+TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_NonBrailleKeyPress_ClearsPendingInputAndPassesThrough)
+{
+    ON_CALL(*m_brailleConfiguration, sixKeyInputEnabled()).WillByDefault(Return(true));
+
+    EXPECT_CALL(*m_notationBraille, clearPendingInput()).Times(1);
+    EXPECT_CALL(*m_notationBraille, setKeys(_)).Times(0);
+
+    QKeyEvent* aPress = make_keyEvent(QEvent::KeyPress, Qt::Key_A);
+    m_controller->keyPressEvent(aPress);
+
+    EXPECT_FALSE(aPress->isAccepted());
+}
+
+TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ModifiedSixKeyShortcut_ClearsPendingInputAndPassesThrough)
+{
+    ON_CALL(*m_brailleConfiguration, sixKeyInputEnabled()).WillByDefault(Return(true));
+
+    EXPECT_CALL(*m_notationBraille, clearPendingInput()).Times(1);
+    EXPECT_CALL(*m_notationBraille, setKeys(_)).Times(0);
+
+    QKeyEvent* modifiedShortcut = make_keyEvent(QEvent::ShortcutOverride, Qt::Key_K, Qt::ControlModifier);
+    bool accepted = m_controller->shortcutOverrideEvent(modifiedShortcut);
+
+    EXPECT_FALSE(accepted);
+    EXPECT_FALSE(modifiedShortcut->isAccepted());
+}
+
+TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_InterleavedShortcutOverrideAndPress_KeepsChord)
+{
+    ON_CALL(*m_brailleConfiguration, sixKeyInputEnabled()).WillByDefault(Return(true));
+    ON_CALL(*m_noteInput, isNoteInputMode()).WillByDefault(Return(true));
+    ON_CALL(*m_notationBraille, isBrailleInputMode()).WillByDefault(Return(true));
+
+    EXPECT_CALL(*m_notationBraille, clearPendingInput()).Times(0);
+    EXPECT_CALL(*m_notationBraille, setKeys(QString("S+F"))).Times(1);
+
+    QKeyEvent* sOverride = make_keyEvent(QEvent::ShortcutOverride, Qt::Key_S);
+    m_controller->shortcutOverrideEvent(sOverride);
+
+    QKeyEvent* sPress = make_keyEvent(QEvent::KeyPress, Qt::Key_S);
+    m_controller->keyPressEvent(sPress);
+
+    QKeyEvent* fOverride = make_keyEvent(QEvent::ShortcutOverride, Qt::Key_F);
+    m_controller->shortcutOverrideEvent(fOverride);
+
+    QKeyEvent* fPress = make_keyEvent(QEvent::KeyPress, Qt::Key_F);
+    m_controller->keyPressEvent(fPress);
+
+    QKeyEvent* sRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_S);
+    m_controller->keyReleaseEvent(sRelease);
+
+    QKeyEvent* fRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_F);
+    m_controller->keyReleaseEvent(fRelease);
 }
 
 TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ContextLostBeforeRelease_ClearsState)
@@ -1304,6 +1424,35 @@ TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ContextLossDuringCho
 
     QKeyEvent* jOverride = make_keyEvent(QEvent::ShortcutOverride, Qt::Key_J);
     m_controller->shortcutOverrideEvent(jOverride);
+
+    QKeyEvent* jPress = make_keyEvent(QEvent::KeyPress, Qt::Key_J);
+    m_controller->keyPressEvent(jPress);
+
+    QKeyEvent* jRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_J);
+    m_controller->keyReleaseEvent(jRelease);
+}
+
+TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ClearInputBuffer_ClearsPendingInputAndPartialChord)
+{
+    ON_CALL(*m_brailleConfiguration, sixKeyInputEnabled()).WillByDefault(Return(true));
+    ON_CALL(*m_noteInput, isNoteInputMode()).WillByDefault(Return(true));
+
+    QKeyEvent* sPress = make_keyEvent(QEvent::KeyPress, Qt::Key_S);
+    m_controller->keyPressEvent(sPress);
+    EXPECT_TRUE(sPress->isAccepted());
+
+    EXPECT_CALL(*m_notationBraille, clearPendingInput()).Times(1);
+    EXPECT_CALL(*m_notationBraille, setKeys(_)).Times(0);
+
+    m_controller->clearBrailleInputBuffer();
+
+    QKeyEvent* sRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_S);
+    m_controller->keyReleaseEvent(sRelease);
+    EXPECT_TRUE(sRelease->isAccepted());
+
+    Mock::VerifyAndClearExpectations(m_notationBraille.get());
+
+    EXPECT_CALL(*m_notationBraille, setKeys(QString("J"))).Times(1);
 
     QKeyEvent* jPress = make_keyEvent(QEvent::KeyPress, Qt::Key_J);
     m_controller->keyPressEvent(jPress);

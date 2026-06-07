@@ -593,6 +593,11 @@ static QString restAnnouncement(BrailleInputState* input)
            .arg(durationAnnouncement(input->getCloseDuration()));
 }
 
+void NotationBraille::clearPendingInput()
+{
+    clearPendingBrailleInput(brailleInput());
+}
+
 void NotationBraille::setKeys(const QString& sequence)
 {
     LOGD() << sequence;
@@ -899,15 +904,22 @@ bool NotationBraille::addTie()
         return false;
     }
 
-    score()->startCmd(TranslatableString("undoableAction", "Add tie"));
     Note* note = toNote(currentEngravingItem());
+    Note* tieStartNote = brailleInput()->tieStartNote();
+
+    if (note->chord()->segment()->tick() < tieStartNote->chord()->segment()->tick()) {
+        brailleInput()->clearTie();
+        return false;
+    }
+
+    score()->startCmd(TranslatableString("undoableAction", "Add tie"));
 
     Tie* tie = Factory::createTie(score()->dummy());
-    tie->setStartNote(brailleInput()->tieStartNote());
+    tie->setStartNote(tieStartNote);
     tie->setEndNote(note);
-    tie->setTrack(brailleInput()->tieStartNote()->track());
-    tie->setTick(brailleInput()->tieStartNote()->chord()->segment()->tick());
-    tie->setTicks(note->chord()->segment()->tick() - brailleInput()->tieStartNote()->chord()->segment()->tick());
+    tie->setTrack(tieStartNote->track());
+    tie->setTick(tieStartNote->chord()->segment()->tick());
+    tie->setTicks(note->chord()->segment()->tick() - tieStartNote->chord()->segment()->tick());
     score()->undoAddElement(tie);
     score()->endCmd();
     return true;
@@ -924,6 +936,11 @@ bool NotationBraille::addSlur()
             LOGD() << "add slur";
             ChordRest* firstChordRest = toChordRest(note1->parent());
             ChordRest* secondChordRest = toChordRest(note2->parent());
+
+            if (secondChordRest->tick() < firstChordRest->tick()) {
+                brailleInput()->clearSlur();
+                return false;
+            }
 
             score()->startCmd(TranslatableString("undoableAction", "Add slur"));
 
@@ -969,6 +986,11 @@ bool NotationBraille::addLongSlur()
         if (note1->parent()->isChordRest() && note2->parent()->isChordRest()) {
             ChordRest* firstChordRest = toChordRest(note1->parent());
             ChordRest* secondChordRest = toChordRest(note2->parent());
+
+            if (secondChordRest->tick() < firstChordRest->tick()) {
+                brailleInput()->clearLongSlur();
+                return false;
+            }
 
             score()->startCmd(TranslatableString("undoableAction", "Add long slur"));
 

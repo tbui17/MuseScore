@@ -52,6 +52,7 @@ public:
     virtual void setCursorPosition(const int pos) = 0;
     virtual void setCurrentItemPosition(const int, const int) = 0;
     virtual void setKeys(const QString&) = 0;
+    virtual void clearPendingInput() = 0;
 
     virtual void setMode(const BrailleMode) = 0;
     virtual void toggleMode() = 0;
