@@ -4,5 +4,4 @@
   "embeddings": true,
   "workerTimeout": 600,
   "workers": 16
-
 }
