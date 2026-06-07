@@ -319,6 +319,7 @@ target_include_directories(notationscene_qml PRIVATE
 )
 
 target_link_libraries(notationscene_qml PRIVATE
+    braille
     muse::uicomponents_qml
 )
 

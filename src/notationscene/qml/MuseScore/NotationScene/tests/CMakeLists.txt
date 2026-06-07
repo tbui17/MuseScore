@@ -33,6 +33,7 @@ set(MODULE_TEST_SRC
 set(MODULE_TEST_LINK
     engraving
     notationscene_qml
+    braille
 )
 
 set(MODULE_TEST_DATA_ROOT ${CMAKE_CURRENT_LIST_DIR})

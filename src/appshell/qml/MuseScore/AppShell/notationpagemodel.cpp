@@ -60,6 +60,10 @@ void NotationPageModel::init()
         dispatcher()->reg(this, actionCode, [this, dockName]() { toggleDock(dockName); });
     }
 
+    dispatcher()->reg(this, "toggle-braille-six-key-input", [this]() {
+        brailleConfiguration()->setSixKeyInputEnabled(!brailleConfiguration()->sixKeyInputEnabled());
+    });
+
     globalContext()->currentNotationChanged().onNotify(this, [this]() {
         onNotationChanged();
     });

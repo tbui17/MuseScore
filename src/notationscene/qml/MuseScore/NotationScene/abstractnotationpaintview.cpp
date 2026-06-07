@@ -351,6 +351,8 @@ void AbstractNotationPaintView::onLoadNotation(INotationPtr)
 
     if (isMainView()) {
         connect(this, &QQuickPaintedItem::focusChanged, this, [this](bool focused) {
+            m_inputController->focusChanged(focused);
+
             if (notation()) {
                 notation()->accessibility()->setEnabled(focused);
             }

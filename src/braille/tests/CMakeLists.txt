@@ -20,6 +20,10 @@
 
 set(MODULE_TEST braille_tests)
 
+set(MODULE_TEST_INCLUDE
+    ${PROJECT_SOURCE_DIR}/src/braille
+)
+
 set(MODULE_TEST_SRC
     ${PROJECT_SOURCE_DIR}/src/engraving/tests/utils/scorerw.cpp
     ${PROJECT_SOURCE_DIR}/src/engraving/tests/utils/scorerw.h

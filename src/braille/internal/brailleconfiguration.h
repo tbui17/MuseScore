@@ -37,6 +37,10 @@ public:
     bool braillePanelEnabled() const override;
     void setBraillePanelEnabled(const bool enabled) override;
 
+    muse::async::Notification sixKeyInputEnabledChanged() const override;
+    bool sixKeyInputEnabled() const override;
+    void setSixKeyInputEnabled(const bool enabled) override;
+
     muse::async::Notification intervalDirectionChanged() const override;
     braille::BrailleIntervalDirection intervalDirection() const override;
     void setIntervalDirection(const braille::BrailleIntervalDirection) override;
@@ -48,6 +52,7 @@ public:
 
 private:
     muse::async::Notification m_braillePanelEnabledChanged;
+    muse::async::Notification m_sixKeyInputEnabledChanged;
     muse::async::Notification m_brailleTableChanged;
     muse::async::Notification m_intervalDirectionChanged;
 };

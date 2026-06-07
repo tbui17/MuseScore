@@ -29,6 +29,7 @@
 
 #include "engraving/dom/masterscore.h"
 #include "../internal/braille.h"
+#include "../internal/brailleconfiguration.h"
 #include "../internal/brailleinput.h"
 
 using namespace mu::engraving;
@@ -298,4 +299,18 @@ TEST(BrailleInputStateTests, removeLastInputCellRemovesOnlyTheLastCell)
     EXPECT_EQ(state.buffer(), "");
     EXPECT_FALSE(state.hasPendingInput());
     EXPECT_FALSE(state.removeLastInputCell());
+}
+
+TEST(BrailleConfigurationTests, sixKeyInputEnabledDefaultsToFalseAndCanBeChanged)
+{
+    BrailleConfiguration configuration;
+    configuration.init();
+
+    EXPECT_FALSE(configuration.sixKeyInputEnabled());
+
+    configuration.setSixKeyInputEnabled(true);
+    EXPECT_TRUE(configuration.sixKeyInputEnabled());
+
+    configuration.setSixKeyInputEnabled(false);
+    EXPECT_FALSE(configuration.sixKeyInputEnabled());
 }

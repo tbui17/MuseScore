@@ -39,6 +39,7 @@ using namespace muse::dock;
 static const ActionCode FULL_SCREEN_CODE("fullscreen");
 static const ActionCode TOGGLE_NAVIGATOR_ACTION_CODE("toggle-navigator");
 static const ActionCode TOGGLE_BRAILLE_ACTION_CODE("toggle-braille-panel");
+static const ActionCode TOGGLE_BRAILLE_SIX_KEY_INPUT_ACTION_CODE("toggle-braille-six-key-input");
 static const ActionCode TOGGLE_PERCUSSION_PANEL_ACTION_CODE("toggle-percussion-panel");
 
 const UiActionList ApplicationUiActions::m_actions = {
@@ -176,6 +177,13 @@ const UiActionList ApplicationUiActions::m_actions = {
              TranslatableString("action", "Show/hide braille panel"),
              Checkable::Yes
              ),
+    UiAction(TOGGLE_BRAILLE_SIX_KEY_INPUT_ACTION_CODE,
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_ANY,
+             TranslatableString("action", "Braille six-key input"),
+             TranslatableString("action", "Use S, D, F, J, K, and L as braille dot keys in the score"),
+             Checkable::Yes
+             ),
 
     // Horizontal panels
     UiAction("toggle-timeline",
@@ -310,6 +318,10 @@ void ApplicationUiActions::init()
         m_actionCheckedChanged.send({ TOGGLE_BRAILLE_ACTION_CODE });
     });
 
+    brailleConfiguration()->sixKeyInputEnabledChanged().onNotify(this, [this]() {
+        m_actionCheckedChanged.send({ TOGGLE_BRAILLE_SIX_KEY_INPUT_ACTION_CODE });
+    });
+
     dockWindowProvider()->windowChanged().onNotify(this, [this]() {
         listenOpenedDocksChanged(dockWindowProvider()->window());
     });
@@ -352,6 +364,10 @@ bool ApplicationUiActions::actionChecked(const UiAction& act) const
 {
     if (act.code == FULL_SCREEN_CODE) {
         return mainWindow()->isFullScreen();
+    }
+
+    if (act.code == TOGGLE_BRAILLE_SIX_KEY_INPUT_ACTION_CODE) {
+        return brailleConfiguration() && brailleConfiguration()->sixKeyInputEnabled();
     }
 
     QMap<ActionCode, DockName> toggleDockActions = ApplicationUiActions::toggleDockActions();
