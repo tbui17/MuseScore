@@ -194,13 +194,13 @@ try {
 
     $localAppData = $env:LOCALAPPDATA
     $tempPath = $env:TEMP
-    $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $commandPath = $MyInvocation.MyCommand.Path
+    $ScriptRoot = if ([string]::IsNullOrWhiteSpace($commandPath)) { '' } else { Split-Path -Parent $commandPath }
     $desktopPath = [Environment]::GetFolderPath('Desktop')
     $programsPath = [Environment]::GetFolderPath('Programs')
 
     Assert-RequiredPath -Name 'LOCALAPPDATA' -Value $localAppData
     Assert-RequiredPath -Name 'TEMP' -Value $tempPath
-    Assert-RequiredPath -Name 'Script root' -Value $ScriptRoot
     Assert-RequiredPath -Name 'Desktop' -Value $desktopPath
     Assert-RequiredPath -Name 'Start Menu Programs' -Value $programsPath
 
@@ -210,7 +210,7 @@ try {
         $WorkRoot = Join-Path $tempPath 'MuseScore-Braille-GitHub-Install'
     }
 
-    $PayloadZip = Join-Path $ScriptRoot 'payload\MuseScore-Braille.zip'
+    $PayloadZip = if ([string]::IsNullOrWhiteSpace($ScriptRoot)) { '' } else { Join-Path $ScriptRoot 'payload\MuseScore-Braille.zip' }
     $InstalledExe = Join-Path $InstallRoot $ExpectedExeRelativePath
     $MetadataPath = Join-Path $InstallRoot 'INSTALL-METADATA.txt'
     $DesktopShortcut = Join-Path $desktopPath "$ShortcutName.lnk"
@@ -230,7 +230,7 @@ try {
     Write-Log "Installing $PackageName..."
     Write-Log 'Validated 64-bit Windows.'
 
-    if (-not (Test-Path -LiteralPath $PayloadZip -PathType Leaf)) {
+    if ([string]::IsNullOrWhiteSpace($PayloadZip) -or -not (Test-Path -LiteralPath $PayloadZip -PathType Leaf)) {
         $downloadedPayload = Resolve-PayloadFromGitHub -WorkRoot $WorkRoot -Owner $Owner -Repo $Repo -ReleaseTag $ReleaseTag -AssetPattern $AssetPattern -DownloadUrl $DownloadUrl
         if ($downloadedPayload) {
             $PayloadZip = $downloadedPayload

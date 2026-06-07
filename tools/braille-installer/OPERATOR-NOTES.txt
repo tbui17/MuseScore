@@ -2,31 +2,23 @@ MuseScore Braille Installer - Operator Notes
 
 Recommended GitHub release flow:
 1. Upload MuseScore-Braille-Installer-YYYY-MM-DD.zip as a release asset on https://github.com/tbui17/MuseScore.
-2. Download Install-MuseScore-Braille.ps1 from this branch or the release materials.
-3. Run the installer script to download the latest matching release ZIP, extract it, and start setup:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1
-
-If PowerShell 7 is installed, opening pwsh and running the script directly is also supported:
-.\Install-MuseScore-Braille.ps1
-
-The powershell.exe form is documented because Windows includes it by default and `-ExecutionPolicy Bypass` applies only to that one process.
+2. Mark the release as a normal release, not a prerelease, so GitHub's latest-release API can find it.
+3. Ask the client to open PowerShell 7 and run this command to fetch the current installer script, download the latest matching release ZIP, extract it, and start setup:
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/tbui17/MuseScore/feat/braille-normal-input/tools/braille-installer/Install-MuseScore-Braille.ps1')))
 
 GitHub download dry run command:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1 -WhatIf
-
-PowerShell 7 dry run command:
-.\Install-MuseScore-Braille.ps1 -WhatIf
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/tbui17/MuseScore/feat/braille-normal-input/tools/braille-installer/Install-MuseScore-Braille.ps1'))) -WhatIf
 
 If you already have the ZIP, extract it and use the local commands below.
 
-Install command:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1
+Install command from an extracted package:
+.\Install-MuseScore-Braille.ps1
 
-Dry run command:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1 -WhatIf
+Dry run command from an extracted package:
+.\Install-MuseScore-Braille.ps1 -WhatIf
 
-Uninstall command:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall-MuseScore-Braille.ps1
+Uninstall command from an extracted package:
+.\Uninstall-MuseScore-Braille.ps1
 
 Install behavior:
 - Requires 64-bit Windows.
