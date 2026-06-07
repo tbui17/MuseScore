@@ -5,23 +5,16 @@ $ErrorActionPreference = 'Stop'
 
 $PackageName = 'MuseScore Braille Installer'
 $ShortcutName = 'MuseScore Braille Test Build'
-$InstallRoot = Join-Path $env:LOCALAPPDATA 'MuseScore-Braille'
-$LogPath = Join-Path $env:LOCALAPPDATA 'MuseScore-Braille-Install.log'
-$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PayloadZip = Join-Path $ScriptRoot 'payload\MuseScore-Braille.zip'
 $ExpectedExeRelativePath = 'bin\MuseScoreStudio5.exe'
-$InstalledExe = Join-Path $InstallRoot $ExpectedExeRelativePath
-$MetadataPath = Join-Path $InstallRoot 'INSTALL-METADATA.txt'
-$DesktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) "$ShortcutName.lnk"
-$StartMenuDir = Join-Path ([Environment]::GetFolderPath('Programs')) $ShortcutName
-$StartMenuShortcut = Join-Path $StartMenuDir "$ShortcutName.lnk"
 
 function Write-Log {
     param([Parameter(Mandatory = $true)][string]$Message)
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $line = "[$timestamp] $Message"
     Write-Host $Message
-    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+    if (-not $WhatIfPreference) {
+        Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+    }
 }
 
 function Assert-64BitWindows {
@@ -39,6 +32,17 @@ function Assert-NoMuseScoreRunning {
     if ($running) {
         $processList = ($running | ForEach-Object { "$($_.ProcessName) (PID $($_.Id))" }) -join ', '
         throw "Please close MuseScore before installing. Running process(es): $processList"
+    }
+}
+
+function Assert-RequiredPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [AllowEmptyString()][string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        throw "$Name path could not be resolved."
     }
 }
 
@@ -84,14 +88,38 @@ function New-Shortcut {
 }
 
 try {
-    if (-not (Test-Path -LiteralPath (Split-Path -Parent $LogPath))) {
-        New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force | Out-Null
+    Assert-64BitWindows
+
+    $localAppData = $env:LOCALAPPDATA
+    $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $desktopPath = [Environment]::GetFolderPath('Desktop')
+    $programsPath = [Environment]::GetFolderPath('Programs')
+
+    Assert-RequiredPath -Name 'LOCALAPPDATA' -Value $localAppData
+    Assert-RequiredPath -Name 'Script root' -Value $ScriptRoot
+    Assert-RequiredPath -Name 'Desktop' -Value $desktopPath
+    Assert-RequiredPath -Name 'Start Menu Programs' -Value $programsPath
+
+    $InstallRoot = Join-Path $localAppData 'MuseScore-Braille'
+    $LogPath = Join-Path $localAppData 'MuseScore-Braille-Install.log'
+    $PayloadZip = Join-Path $ScriptRoot 'payload\MuseScore-Braille.zip'
+    $InstalledExe = Join-Path $InstallRoot $ExpectedExeRelativePath
+    $MetadataPath = Join-Path $InstallRoot 'INSTALL-METADATA.txt'
+    $DesktopShortcut = Join-Path $desktopPath "$ShortcutName.lnk"
+    $StartMenuDir = Join-Path $programsPath $ShortcutName
+    $StartMenuShortcut = Join-Path $StartMenuDir "$ShortcutName.lnk"
+
+    $logParent = Split-Path -Parent $LogPath
+    if (-not (Test-Path -LiteralPath $logParent)) {
+        if ($PSCmdlet.ShouldProcess($logParent, 'Create log directory')) {
+            New-Item -ItemType Directory -Path $logParent -Force | Out-Null
+        }
     }
 
-    Set-Content -LiteralPath $LogPath -Value "$PackageName log started $(Get-Date -Format o)" -Encoding UTF8
+    if (-not $WhatIfPreference) {
+        Set-Content -LiteralPath $LogPath -Value "$PackageName log started $(Get-Date -Format o)" -Encoding UTF8
+    }
     Write-Log "Installing $PackageName..."
-
-    Assert-64BitWindows
     Write-Log 'Validated 64-bit Windows.'
 
     Assert-Payload
@@ -167,6 +195,8 @@ try {
 catch {
     Write-Host ''
     Write-Host "Install failed: $($_.Exception.Message)" -ForegroundColor Red
-    Add-Content -LiteralPath $LogPath -Value "Install failed: $($_.Exception.Message)" -Encoding UTF8
+    if (-not $WhatIfPreference -and -not [string]::IsNullOrWhiteSpace($LogPath)) {
+        Add-Content -LiteralPath $LogPath -Value "Install failed: $($_.Exception.Message)" -Encoding UTF8
+    }
     exit 1
 }
