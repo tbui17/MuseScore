@@ -3,11 +3,11 @@ MuseScore Braille Installer - Operator Notes
 Recommended GitHub release flow:
 1. Upload MuseScore-Braille-Installer-YYYY-MM-DD.zip as a release asset on https://github.com/tbui17/MuseScore.
 2. Download Install-MuseScore-Braille.ps1 from this branch or the release materials.
-3. Run the installer script to download the release ZIP, extract it, and start setup:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1 -Owner tbui17 -Repo MuseScore -ReleaseTag braille-test-YYYY-MM-DD
+3. Run the installer script to download the latest matching release ZIP, extract it, and start setup:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1
 
 GitHub download dry run command:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1 -Owner tbui17 -Repo MuseScore -ReleaseTag braille-test-YYYY-MM-DD -WhatIf
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-MuseScore-Braille.ps1 -WhatIf
 
 If you already have the ZIP, extract it and use the local commands below.
 
