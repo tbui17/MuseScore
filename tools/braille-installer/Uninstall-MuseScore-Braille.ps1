@@ -96,7 +96,13 @@ try {
         }
     }
 
-    Write-Log 'Uninstall complete.'
+    if (Test-Path -LiteralPath $LogPath) {
+        Write-Log "Removing installer log: $LogPath"
+        if ($PSCmdlet.ShouldProcess($LogPath, 'Remove installer log')) {
+            Remove-Item -LiteralPath $LogPath -Force
+        }
+    }
+
     Write-Host ''
     Write-Host 'Uninstall complete.'
 }
