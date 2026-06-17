@@ -306,6 +306,7 @@ MenuItem* AppMenuModel::makeViewMenu()
         historyItem,
         makeMenuItem("toggle-navigator"),
         makeMenuItem("toggle-braille-panel"),
+        makeMenuItem("toggle-braille-six-key-input"),
         makeMenuItem("toggle-timeline"),
         makeMenuItem("toggle-mixer"),
         makeMenuItem("toggle-piano-keyboard"),

@@ -1,0 +1,47 @@
+MuseScore Braille Installer - Operator Notes
+
+Recommended GitHub release flow:
+1. Upload MuseScore-Braille-Installer-YYYY-MM-DD.zip as a release asset on https://github.com/tbui17/MuseScore.
+2. Mark the release as a normal release, not a prerelease, so GitHub's latest-release API can find it.
+3. Ask the client to open PowerShell 7 and run this command to fetch the current installer script, download the latest matching release ZIP, extract it, and start setup:
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/tbui17/MuseScore/feat/braille-normal-input/tools/braille-installer/Install-MuseScore-Braille.ps1')))
+
+GitHub download dry run command:
+& ([scriptblock]::Create((irm 'https://raw.githubusercontent.com/tbui17/MuseScore/feat/braille-normal-input/tools/braille-installer/Install-MuseScore-Braille.ps1'))) -WhatIf
+
+If you already have the ZIP, extract it and use the local commands below.
+
+Install command from an extracted package:
+.\Install-MuseScore-Braille.ps1
+
+Dry run command from an extracted package:
+.\Install-MuseScore-Braille.ps1 -WhatIf
+
+Uninstall command from an extracted package:
+.\Uninstall-MuseScore-Braille.ps1
+
+Install behavior:
+- Requires 64-bit Windows.
+- Refuses to run if any MuseScoreStudio process is open.
+- Installs to %LOCALAPPDATA%\MuseScore-Braille.
+- Removes any existing custom install folder before extracting the new build.
+- Creates Desktop and Start Menu shortcuts named "MuseScore Braille Test Build".
+- Does not launch MuseScore after install.
+- Does not change file associations.
+- Does not delete normal MuseScore settings, scores, plugins, templates, or workspaces.
+
+Post-install smoke test:
+1. Launch "MuseScore Braille Test Build" from the shortcut.
+2. Open or create a simple score.
+3. Confirm the six-key braille toggle is visible in the note-input toolbar.
+4. Enable six-key input.
+5. Enter C + 3rd as a two-cell chord:
+   first chord: F+J+K+L
+   second chord: S+J+L
+6. Type a partial braille cell, then press semicolon.
+7. Confirm the partial input clears and normal entry can continue.
+8. Close MuseScore.
+
+Support files:
+- Installer log: %LOCALAPPDATA%\MuseScore-Braille-Install.log
+- Install metadata: %LOCALAPPDATA%\MuseScore-Braille\INSTALL-METADATA.txt

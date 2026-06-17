@@ -3122,6 +3122,7 @@ const muse::ui::ToolConfig& NotationUiActions::defaultNoteInputBarConfig()
             { "pad-dot3", false },
             { "pad-dot4", false },
             { "pad-rest", true },
+            { "toggle-braille-six-key-input", true },
             { "", true },
             { "flat2", true },
             { "flat", true },

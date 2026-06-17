@@ -181,7 +181,7 @@ function Get-ConfigureArgs {
 
     $installPrefix = Resolve-BuildRelativePath -BuildDir $BuildDir -Path $MuseScoreInstallDir
 
-    return @(
+    $args = @(
         "-S", $RepoRoot,
         "-B", $BuildDir,
         "-G", "Ninja",
@@ -208,6 +208,12 @@ function Get-ConfigureArgs {
         "-DCMAKE_SKIP_RPATH=$MuseScoreNoRpath",
         "-DMUSE_COMPILE_USE_UNITY=$MuseScoreCompileUseUnity"
     ) + $AdditionalArgs
+
+    if ($CMakeMakeProgramOverride) {
+        $args += "-DCMAKE_MAKE_PROGRAM=$CMakeMakeProgramOverride"
+    }
+
+    return $args
 }
 
 function Start-Build {
@@ -241,6 +247,24 @@ $BuildTargets = @('release','debug','relwithdebinfo','install','installrelwithde
 
 $Target = $Target.ToLowerInvariant()
 
+$CMakeMakeProgramOverride = $null
+
+function Find-VisualStudioNinja {
+    $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vsWhere)) {
+        return $null
+    }
+    $vsPath = & $vsWhere -latest -property installationPath 2>$null
+    if (-not $vsPath) {
+        return $null
+    }
+    $ninjaPath = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
+    if (Test-Path $ninjaPath) {
+        return $ninjaPath
+    }
+    return $null
+}
+
 if ($Target -in $BuildTargets) {
     Require-Command 'cmake'
     Require-Command 'ninja'
@@ -250,6 +274,21 @@ if ($Target -in $BuildTargets) {
         throw "ninja --version failed with exit code $LASTEXITCODE"
     }
     Write-Host "ninja version $ninjaVersion"
+
+    if ($ninjaVersion -match "1\.13\.0" -and $ninjaVersion -match "kitware") {
+        Write-Host "WARNING: Ninja 1.13.0 (Kitware) has a known bug that truncates response files," -ForegroundColor Yellow
+        Write-Host "         causing LNK1104 linker errors on large projects (ninja-build/ninja#2616)." -ForegroundColor Yellow
+        $vsNinja = Find-VisualStudioNinja
+        if ($vsNinja) {
+            $vsNinjaVersion = (& $vsNinja --version)
+            Write-Host "         Falling back to Visual Studio's Ninja ($vsNinjaVersion): $vsNinja" -ForegroundColor Yellow
+            $CMakeMakeProgramOverride = $vsNinja
+        } else {
+            Write-Host "         Visual Studio's bundled Ninja was not found." -ForegroundColor Yellow
+            Write-Host "         Fix: pip uninstall ninja  (to use VS's Ninja)" -ForegroundColor Yellow
+            Write-Host "         Or:  pip install 'ninja>=1.14'" -ForegroundColor Yellow
+        }
+    }
 }
 
 

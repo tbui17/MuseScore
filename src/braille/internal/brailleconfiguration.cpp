@@ -31,6 +31,7 @@ namespace mu::engraving {
 static const std::string module_name("braille");
 
 static const Settings::Key BRAILLE_STATUS(module_name, "score/braille/status");
+static const Settings::Key BRAILLE_SIX_KEY_INPUT_ENABLED(module_name, "score/braille/sixKeyInputEnabled");
 static const Settings::Key BRAILLE_TABLE(module_name, "score/braille/table");
 static const Settings::Key BRAILLE_INTERVAL_DIRECTION(module_name, "score/braille/intervalDirection");
 
@@ -39,6 +40,10 @@ void BrailleConfiguration::init()
     settings()->setDefaultValue(BRAILLE_STATUS, Val(false));
     settings()->valueChanged(BRAILLE_STATUS).onReceive(this, [this](const Val&) {
         m_braillePanelEnabledChanged.notify();
+    });
+    settings()->setDefaultValue(BRAILLE_SIX_KEY_INPUT_ENABLED, Val(false));
+    settings()->valueChanged(BRAILLE_SIX_KEY_INPUT_ENABLED).onReceive(this, [this](const Val&) {
+        m_sixKeyInputEnabledChanged.notify();
     });
     settings()->setDefaultValue(BRAILLE_TABLE, Val("Unified English uncontracted braille [en-ueb-g1.ctb]"));
     settings()->valueChanged(BRAILLE_TABLE).onReceive(this, [this](const Val&) {
@@ -63,6 +68,21 @@ bool BrailleConfiguration::braillePanelEnabled() const
 void BrailleConfiguration::setBraillePanelEnabled(const bool enabled)
 {
     settings()->setSharedValue(BRAILLE_STATUS, Val(enabled));
+}
+
+muse::async::Notification BrailleConfiguration::sixKeyInputEnabledChanged() const
+{
+    return m_sixKeyInputEnabledChanged;
+}
+
+bool BrailleConfiguration::sixKeyInputEnabled() const
+{
+    return settings()->value(BRAILLE_SIX_KEY_INPUT_ENABLED).toBool();
+}
+
+void BrailleConfiguration::setSixKeyInputEnabled(const bool enabled)
+{
+    settings()->setSharedValue(BRAILLE_SIX_KEY_INPUT_ENABLED, Val(enabled));
 }
 
 muse::async::Notification BrailleConfiguration::intervalDirectionChanged() const

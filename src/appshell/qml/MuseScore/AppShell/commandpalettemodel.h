@@ -73,6 +73,7 @@ private:
     void reloadAvailableActions();
     void rebuildResults();
     QList<Item> recentItems() const;
+    QList<Item> allItems() const;
     QList<Item> matchingItems() const;
     void setItems(const QList<Item>& items);
     void addRecentAction(const muse::actions::ActionCode& actionCode);

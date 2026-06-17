@@ -89,51 +89,64 @@ UiContext UiContextResolver::resolveCurrentUiContext() const
         currentUri = diagnostics::diagnosticCurrentUri(interactive()->stack());
 #endif
 
-        if (currentUri == HOME_PAGE_URI) {
-            return context::UiCtxHomeOpened;
-        }
-
-        if (currentUri == NOTATION_PAGE_URI) {
-            auto notation = globalContext()->currentNotation();
-            if (!notation) {
-                //! NOTE The notation page is open, but the notation itself is not loaded - we consider that the notation is not open.
-                //! We need to think, maybe we need a separate value for this case.
-                return context::UiCtxUnknown;
+        if (interactive()->isCurrentUriDialog().val) {
+            bool isExtensionDialog = currentUri == EXTENSIONS_DIALOG_URI;
+            if (isExtensionDialog) {
+                return context::UiCtxDialogOpened;
             }
 
-            INavigationPanel* activePanel = navigationController()->activePanel();
-            if (activePanel) {
-                const QString panelName = activePanel->name();
-                if (panelName == NOTATION_NAVIGATION_PANEL) {
-                    return context::UiCtxProjectFocused;
-                } else if (panelName == BRAILLE_NAVIGATION_PANEL) {
-                    return context::UiCtxBrailleFocused;
+            std::vector<Uri> navStack = interactive()->stack();
+            for (int i = static_cast<int>(navStack.size()) - 1; i >= 0; --i) {
+                UiContext ctx = resolveContextForUri(navStack[i]);
+                if (ctx != context::UiCtxDialogOpened && ctx != context::UiCtxUnknown) {
+                    return ctx;
                 }
             }
 
-            return context::UiCtxProjectOpened;
+            return globalContext()->currentNotation() ? context::UiCtxProjectOpened : context::UiCtxUnknown;
         }
 
-        if (currentUri == PUBLISH_PAGE_URI) {
-            return context::UiCtxPublishOpened;
-        }
-
-        if (currentUri == DEVTOOLS_PAGE_URI) {
-            return context::UiCtxDevToolsOpened;
-        }
-
-        if (interactive()->isCurrentUriDialog().val) {
-            bool isExtensionDialog = currentUri == EXTENSIONS_DIALOG_URI;
-            if (!isExtensionDialog) {
-                return context::UiCtxDialogOpened;
-            }
-        }
-
-        return context::UiCtxUnknown;
+        return resolveContextForUri(currentUri);
     }
 #endif
 
     return globalContext()->currentNotation() ? context::UiCtxProjectOpened : context::UiCtxUnknown;
+}
+
+UiContext UiContextResolver::resolveContextForUri(const Uri& uri) const
+{
+    if (uri == HOME_PAGE_URI) {
+        return context::UiCtxHomeOpened;
+    }
+
+    if (uri == NOTATION_PAGE_URI) {
+        auto notation = globalContext()->currentNotation();
+        if (!notation) {
+            return context::UiCtxUnknown;
+        }
+
+        INavigationPanel* activePanel = navigationController()->activePanel();
+        if (activePanel) {
+            const QString panelName = activePanel->name();
+            if (panelName == NOTATION_NAVIGATION_PANEL) {
+                return context::UiCtxProjectFocused;
+            } else if (panelName == BRAILLE_NAVIGATION_PANEL) {
+                return context::UiCtxBrailleFocused;
+            }
+        }
+
+        return context::UiCtxProjectOpened;
+    }
+
+    if (uri == PUBLISH_PAGE_URI) {
+        return context::UiCtxPublishOpened;
+    }
+
+    if (uri == DEVTOOLS_PAGE_URI) {
+        return context::UiCtxDevToolsOpened;
+    }
+
+    return context::UiCtxUnknown;
 }
 
 bool UiContextResolver::match(const muse::ui::UiContext& currentCtx, const muse::ui::UiContext& actCtx) const

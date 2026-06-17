@@ -14,6 +14,7 @@ using namespace muse::actions;
 using namespace muse::ui;
 
 static constexpr int MAX_RECENT_ACTIONS = 10;
+static constexpr int MAX_DISPLAY_ACTIONS = 100;
 
 CommandPaletteModel::CommandPaletteModel(QObject* parent)
     : QAbstractListModel(parent), muse::Contextable(muse::iocCtxForQmlObject(this))
@@ -171,7 +172,7 @@ void CommandPaletteModel::reloadAvailableActions()
 
 void CommandPaletteModel::rebuildResults()
 {
-    setItems(m_searchText.isEmpty() ? recentItems() : matchingItems());
+    setItems(m_searchText.isEmpty() ? allItems() : matchingItems());
     emit emptyStateTextChanged();
 }
 
@@ -191,6 +192,11 @@ QList<CommandPaletteModel::Item> CommandPaletteModel::recentItems() const
     }
 
     return result;
+}
+
+QList<CommandPaletteModel::Item> CommandPaletteModel::allItems() const
+{
+    return m_availableActions.mid(0, MAX_DISPLAY_ACTIONS);
 }
 
 QList<CommandPaletteModel::Item> CommandPaletteModel::matchingItems() const
@@ -262,7 +268,5 @@ int CommandPaletteModel::matchScore(const QString& title) const
 
 QString CommandPaletteModel::makeEmptyStateText() const
 {
-    return m_searchText.isEmpty()
-           ? muse::qtrc("appshell/commandpalette", "No recent commands")
-           : muse::qtrc("appshell/commandpalette", "No matching commands");
+    return muse::qtrc("appshell/commandpalette", "No matching commands");
 }

@@ -22,6 +22,8 @@
 #pragma once
 
 #include <QtEvents>
+#include <QSet>
+#include <QStringList>
 
 #include "modularity/ioc.h"
 
@@ -37,6 +39,9 @@
 #include "notation/inotationcontextconfiguration.h"
 
 #include "playback/iplaybackcontroller.h"
+
+#include "braille/ibrailleconfiguration.h"
+#include "braille/inotationbraille.h"
 
 #include "global/iglobalconfiguration.h"
 #include "ui/idragcontroller.h"
@@ -100,6 +105,8 @@ public:
     muse::ContextInject<playback::IPlaybackController> playbackController = { this };
     muse::ContextInject<context::IGlobalContext> globalContext = { this };
     muse::ContextInject<muse::ui::IDragController> dragController = { this };
+    muse::GlobalInject<braille::IBrailleConfiguration> brailleConfiguration;
+    muse::ContextInject<braille::INotationBraille> notationBraille = { this };
 
 public:
     NotationViewInputController(IControlledView* view, const muse::modularity::ContextPtr& iocCtx);
@@ -129,10 +136,12 @@ public:
     void mouseDoubleClickEvent(QMouseEvent* event);
     void hoverMoveEvent(QHoverEvent* event);
     void hoverLeaveEvent(QHoverEvent* event);
+    void focusChanged(bool focused);
     bool shortcutOverrideEvent(QKeyEvent* event);
     void keyPressEvent(QKeyEvent* event);
     void keyReleaseEvent(QKeyEvent* event);
     void inputMethodEvent(QInputMethodEvent* event);
+    void clearBrailleInputBuffer();
 
     bool canHandleInputMethodQuery(Qt::InputMethodQuery query) const;
     QVariant inputMethodQuery(Qt::InputMethodQuery query) const;
@@ -207,6 +216,16 @@ private:
 
     bool isAnchorEditingEvent(QKeyEvent* event) const;
 
+    bool canHandleBrailleSixKeyInput(QKeyEvent* event) const;
+    bool isBrailleSixKeyInputContextActive() const;
+    void handleBrailleSixKeyPress(QKeyEvent* event);
+    void handleBrailleSixKeyRelease(QKeyEvent* event);
+    bool ensureBrailleSixKeyNoteInputStarted() const;
+    void clearBrailleSixKeyState();
+    bool shouldClearBraillePendingInput(QKeyEvent* event) const;
+    void clearBrailleSixKeyInputState();
+    static QString brailleSixKeyName(int key);
+
     bool tryPercussionShortcut(QKeyEvent* event);
 
     IControlledView* m_view = nullptr;
@@ -250,5 +269,9 @@ private:
     bool m_shouldSelectOnLeftClickRelease = false;
     bool m_shouldStartEditOnLeftClickRelease = false;
     bool m_ignoreNextMouseContextMenuEvent = false;
+
+    QSet<int> m_brailleSixKeysPressed;
+    QStringList m_brailleSixKeyBuffer;
+    bool m_brailleSixKeyChordInvalidated = false;
 };
 }

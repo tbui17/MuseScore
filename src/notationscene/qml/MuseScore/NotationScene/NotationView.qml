@@ -294,7 +294,7 @@ FocusScope {
                     navigationPanel.onActiveChanged: function (active) {
                         if (active) {
                             notationView.navigationPanel.setActive(false);
-                            fakeNavCtrl.setActive(false);
+                            fakeNavCtrl.setActive(true);
                         }
                     }
                 }

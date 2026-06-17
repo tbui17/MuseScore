@@ -31,6 +31,22 @@ StyledDialogView {
         }
     }
 
+    function focusResult(index) {
+        if (index < 0) {
+            searchField.navigation.requestActive()
+            return
+        }
+
+        resultsList.positionViewAtIndex(index, ListView.Contain)
+
+        Qt.callLater(function() {
+            var item = resultsList.itemAtIndex(index)
+            if (Boolean(item)) {
+                item.navigation.requestActive()
+            }
+        })
+    }
+
     onOpened: {
         paletteModel.load()
         searchField.clear()
@@ -59,6 +75,10 @@ StyledDialogView {
             hint: qsTrc("appshell/commandpalette", "Search commands")
             accessible.name: hint
 
+            navigation.panel: resultsList.navigation
+            navigation.row: 0
+            navigation.column: 0
+
             onSearchTextChanged: {
                 paletteModel.searchText = searchText
             }
@@ -74,9 +94,11 @@ StyledDialogView {
             Keys.onPressed: function(event) {
                 if (event.key === Qt.Key_Down) {
                     paletteModel.moveSelection(1)
+                    root.focusResult(paletteModel.selectedIndex)
                     event.accepted = true
                 } else if (event.key === Qt.Key_Up) {
                     paletteModel.moveSelection(-1)
+                    root.focusResult(paletteModel.selectedIndex)
                     event.accepted = true
                 }
             }
@@ -91,7 +113,7 @@ StyledDialogView {
                   : qsTrc("appshell/commandpalette", "%1 commands").arg(paletteModel.resultCount)
             color: ui.theme.fontSecondaryColor
             visible: paletteModel.resultCount > 0
-            accessible.name: text
+            Accessible.name: text
         }
 
         StyledListView {
@@ -104,13 +126,18 @@ StyledDialogView {
             visible: paletteModel.resultCount > 0
             accessible.name: qsTrc("appshell/commandpalette", "Command results")
 
+            navigation.section: root.navigationSection
+            navigation.direction: NavigationPanel.Vertical
+            navigation.order: 1
+
             delegate: ListItemBlank {
                 id: resultItem
 
                 width: ListView.view.width
                 isSelected: index === paletteModel.selectedIndex
                 navigation.panel: resultsList.navigation
-                navigation.order: index
+                navigation.row: index + 1
+                navigation.column: 0
                 navigation.accessible.name: model.title
 
                 onClicked: {
@@ -130,6 +157,15 @@ StyledDialogView {
             }
         }
 
+        Connections {
+            target: paletteModel
+            function onSelectedIndexChanged() {
+                if (paletteModel.selectedIndex >= 0) {
+                    resultsList.positionViewAtIndex(paletteModel.selectedIndex, ListView.Contain)
+                }
+            }
+        }
+
         StyledTextLabel {
             id: emptyStateLabel
 
@@ -140,7 +176,7 @@ StyledDialogView {
             text: paletteModel.emptyStateText
             color: ui.theme.fontSecondaryColor
             visible: paletteModel.resultCount === 0
-            accessible.name: text
+            Accessible.name: text
         }
     }
 }

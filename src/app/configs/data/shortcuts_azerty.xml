@@ -809,6 +809,11 @@
     <autorepeat>0</autorepeat>
     </SC>
   <SC>
+    <key>clear-braille-input-buffer</key>
+    <seq>;</seq>
+    <autorepeat>0</autorepeat>
+    </SC>
+  <SC>
     <key>toggle-timeline</key>
     <seq>F12</seq>
     <autorepeat>0</autorepeat>

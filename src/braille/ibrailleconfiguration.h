@@ -41,6 +41,10 @@ public:
     virtual bool braillePanelEnabled() const = 0;
     virtual void setBraillePanelEnabled(const bool enabled) = 0;
 
+    virtual muse::async::Notification sixKeyInputEnabledChanged() const = 0;
+    virtual bool sixKeyInputEnabled() const = 0;
+    virtual void setSixKeyInputEnabled(const bool enabled) = 0;
+
     virtual muse::async::Notification intervalDirectionChanged() const = 0;
     virtual BrailleIntervalDirection intervalDirection() const = 0;
     virtual void setIntervalDirection(const BrailleIntervalDirection direction) = 0;

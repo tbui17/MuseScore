@@ -88,6 +88,7 @@ public:
     void setCursorPosition(const int pos) override;
     void setCurrentItemPosition(const int, const int) override;
     void setKeys(const QString&) override;
+    void clearPendingInput() override;
 
     void setMode(const braille::BrailleMode) override;
     void toggleMode() override;
