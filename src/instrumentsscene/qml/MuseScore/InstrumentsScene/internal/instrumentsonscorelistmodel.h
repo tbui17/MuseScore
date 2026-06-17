@@ -27,6 +27,7 @@
 #include "modularity/ioc.h"
 #include "context/iglobalcontext.h"
 #include "notation/iinstrumentsrepository.h"
+#include "accessibility/iaccessibilitycontroller.h"
 
 namespace mu::instrumentsscene {
 class InstrumentsOnScoreListModel : public muse::uicomponents::SelectableItemListModel, public muse::Contextable
@@ -40,6 +41,7 @@ class InstrumentsOnScoreListModel : public muse::uicomponents::SelectableItemLis
 
     muse::GlobalInject<notation::IInstrumentsRepository> repository;
     muse::ContextInject<context::IGlobalContext> context = { this };
+    muse::ContextInject<muse::accessibility::IAccessibilityController> accessibilityController = { this };
 
 public:
     InstrumentsOnScoreListModel(QObject* parent = nullptr);

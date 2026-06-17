@@ -208,6 +208,7 @@ void InstrumentsOnScoreListModel::addInstruments(const QStringList& instrumentId
     TRACEFUNC;
 
     ItemList items = this->items();
+    QStringList addedNames;
 
     for (const QString& id : instrumentIdList) {
         const InstrumentTemplate& templ = repository()->instrumentTemplate(id);
@@ -222,11 +223,28 @@ void InstrumentsOnScoreListModel::addInstruments(const QStringList& instrumentId
         instrument->familyId = templ.familyId();
         instrument->instrumentTemplate = templ;
 
+        addedNames << instrument->name;
         insertInstrument(items, instrument);
     }
 
     setItems(items);
     verifyScoreOrder();
+
+    if (!addedNames.isEmpty()) {
+        QString namesStr = addedNames.join(", ");
+        int totalCount = items.size();
+        QString announcement;
+
+        if (totalCount == 1) {
+            announcement = muse::qtrc("instruments", "%1 added, 1 instrument in score")
+                               .arg(namesStr);
+        } else {
+            announcement = muse::qtrc("instruments", "%1 added, %n instrument(s) in score", "", totalCount)
+                               .arg(namesStr);
+        }
+
+        accessibilityController()->announce(announcement);
+    }
 }
 
 QVariant InstrumentsOnScoreListModel::currentOrder() const
