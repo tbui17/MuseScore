@@ -91,7 +91,7 @@ StyledDialogView {
                   : qsTrc("appshell/commandpalette", "%1 commands").arg(paletteModel.resultCount)
             color: ui.theme.fontSecondaryColor
             visible: paletteModel.resultCount > 0
-            accessible.name: text
+            Accessible.name: text
         }
 
         StyledListView {
@@ -140,7 +140,7 @@ StyledDialogView {
             text: paletteModel.emptyStateText
             color: ui.theme.fontSecondaryColor
             visible: paletteModel.resultCount === 0
-            accessible.name: text
+            Accessible.name: text
         }
     }
 }
