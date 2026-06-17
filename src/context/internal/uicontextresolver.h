@@ -52,6 +52,7 @@ public:
 private:
     void updateCurrentUiContext();
     muse::ui::UiContext resolveCurrentUiContext() const;
+    muse::ui::UiContext resolveContextForUri(const muse::Uri& uri) const;
 
     muse::ui::UiContext m_currentUiContext;
     muse::async::Notification m_currentUiContextChanged;
