@@ -19,7 +19,7 @@ Daily commands:
       Build the Debug configuration using the existing Ninja build wrapper.
 
   run [args...]
-      Run build.debug\src\app\MuseScoreStudio5.exe with optional arguments.
+      Run build.debug\MuseScoreStudio5.exe with optional arguments.
 
   test <script> [args...]
       Run a MuseScore app test-case script through the Debug executable.
@@ -50,7 +50,7 @@ Without --yes, clean only previews what would be deleted.
 }
 
 function Get-DebugExecutablePath {
-    return (Join-Path $RepoRoot "build.debug\src\app\MuseScoreStudio5.exe")
+    return (Join-Path $RepoRoot "build.debug\MuseScoreStudio5.exe")
 }
 
 function Require-DebugExecutable {
