@@ -49,7 +49,11 @@ void NotationBraille::init()
     setEnabled(brailleConfiguration()->braillePanelEnabled());
     setCurrentItemPosition(-1, -1);
 
-    setMode(BrailleMode::Navigation);
+    if (brailleConfiguration()->sixKeyInputEnabled()) {
+        setMode(BrailleMode::BrailleInput);
+    } else {
+        setMode(BrailleMode::Navigation);
+    }
 
     path_t tablesdir = tablesDefaultDirPath();
     setTablesDir(tablesdir.toStdString().c_str());

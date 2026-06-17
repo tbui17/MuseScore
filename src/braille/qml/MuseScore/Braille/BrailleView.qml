@@ -43,6 +43,9 @@ StyledFlickable {
 
     Component.onCompleted: {
         brailleModel.load()
+        if (brailleModel.mode === 2) {
+            fakeNavCtrl.setActive(true)
+        }
     }
 
     BrailleModel {
