@@ -138,7 +138,10 @@ StyledDialogView {
                 navigation.panel: resultsList.navigation
                 navigation.row: index + 1
                 navigation.column: 0
-                navigation.accessible.name: model.title
+                navigation.accessible.name: qsTrc("appshell/commandpalette", "%1, %2 of %3")
+                                            .arg(model.title)
+                                            .arg(index + 1)
+                                            .arg(paletteModel.resultCount)
 
                 onClicked: {
                     paletteModel.selectedIndex = index
