@@ -239,7 +239,40 @@ void InstrumentsOnScoreListModel::addInstruments(const QStringList& instrumentId
             announcement = muse::qtrc("instruments", "%1 added, 1 instrument in score")
                                .arg(namesStr);
         } else {
-            announcement = muse::qtrc("instruments", "%1 added, %n instrument(s) in score", "", totalCount)
+            announcement = muse::qtrc("instruments", "%1 added, %n instruments in score", "", totalCount)
+                               .arg(namesStr);
+        }
+
+        accessibilityController()->announce(announcement);
+    }
+}
+
+void InstrumentsOnScoreListModel::removeSelectionWithAnnouncement()
+{
+    QStringList removedNames;
+    QList<int> selectedRows = selection()->selectedRows();
+    for (int row : selectedRows) {
+        auto instrument = dynamic_cast<InstrumentItem*>(items()[row]);
+        if (instrument) {
+            removedNames << instrument->name;
+        }
+    }
+
+    removeSelection();
+    int remainingCount = items().size();
+
+    if (!removedNames.isEmpty()) {
+        QString namesStr = removedNames.join(", ");
+        QString announcement;
+
+        if (remainingCount == 0) {
+            announcement = muse::qtrc("instruments", "%1 removed, score has no instruments")
+                               .arg(namesStr);
+        } else if (remainingCount == 1) {
+            announcement = muse::qtrc("instruments", "%1 removed, 1 instrument in score")
+                               .arg(namesStr);
+        } else {
+            announcement = muse::qtrc("instruments", "%1 removed, %n instruments in score", "", remainingCount)
                                .arg(namesStr);
         }
 

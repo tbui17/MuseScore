@@ -93,7 +93,7 @@ Item {
             enabled: root.instrumentsOnScoreModel.isRemovingAvailable
 
             onClicked: {
-                root.instrumentsOnScoreModel.removeSelection()
+                root.instrumentsOnScoreModel.removeSelectionWithAnnouncement()
             }
         }
     }
@@ -168,11 +168,29 @@ Item {
             }
 
             onDoubleClicked: {
-                root.instrumentsOnScoreModel.removeSelection()
+                root.instrumentsOnScoreModel.selectRow(index)
+                root.instrumentsOnScoreModel.removeSelectionWithAnnouncement()
             }
 
             onRemoveSelectionRequested: {
-                root.instrumentsOnScoreModel.removeSelection()
+                var removedIndex = item.index
+
+                if (!root.instrumentsOnScoreModel.hasSelection) {
+                    root.instrumentsOnScoreModel.selectRow(item.index)
+                }
+
+                root.instrumentsOnScoreModel.removeSelectionWithAnnouncement()
+
+                var newCount = root.instrumentsOnScoreModel.count
+                if (newCount > 0) {
+                    var targetIndex = Math.min(removedIndex, newCount - 1)
+                    Qt.callLater(function() {
+                        var delegate = instrumentsView.itemAtIndex(targetIndex)
+                        if (delegate) {
+                            delegate.navigation.requestActive()
+                        }
+                    })
+                }
             }
         }
     }
