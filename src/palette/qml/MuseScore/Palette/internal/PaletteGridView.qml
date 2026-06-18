@@ -141,6 +141,9 @@ StyledGridView {
 
         wrapMode: Text.WordWrap
         horizontalAlignment: Text.AlignLeft
+
+        accessible.role: MUAccessible.StaticText
+        accessible.name: text
     }
 
     Rectangle {

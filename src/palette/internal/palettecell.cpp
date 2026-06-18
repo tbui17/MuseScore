@@ -420,6 +420,19 @@ void AccessiblePaletteCellInterface::setText(QAccessible::Text, const QString&)
 
 QRect AccessiblePaletteCellInterface::rect() const
 {
+    PaletteWidget* palette = qobject_cast<PaletteWidget*>(parentWidget());
+    if (!palette) {
+        return QRect();
+    }
+
+    for (int i = 0; i < palette->actualCellCount(); ++i) {
+        PaletteCellPtr cell = palette->cellAt(i);
+        if (cell.get() == m_cell) {
+            QRect cellRect = palette->rectForCellAt(i);
+            return QRect(palette->mapToGlobal(cellRect.topLeft()), cellRect.size());
+        }
+    }
+
     return QRect();
 }
 

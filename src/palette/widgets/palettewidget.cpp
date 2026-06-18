@@ -1370,7 +1370,7 @@ int AccessiblePaletteWidget::indexOfChild(const QAccessibleInterface* child) con
 
 QAccessible::Role AccessiblePaletteWidget::role() const
 {
-    return QAccessible::StaticText;
+    return QAccessible::List;
 }
 
 QAccessible::State AccessiblePaletteWidget::state() const

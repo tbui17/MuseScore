@@ -159,6 +159,7 @@ public:
     // Sizing
     int heightForWidth(int) const override;
     QSize sizeHint() const override;
+    QRect rectForCellAt(int idx) const;
 
     // Read/write
     void read(mu::engraving::XmlReader&, bool pasteMode);
@@ -212,7 +213,6 @@ private:
 
     int cellIndexForPoint(const QPointF&) const; // Only indices of actual cells
     int theoreticalCellIndexForPoint(const QPointF&) const; // Also indices greater than cells.size() - 1
-    QRect rectForCellAt(int idx) const;
     QPixmap pixmapForCellAt(int cellIdx) const;
 
     const std::vector<PaletteCellPtr>& actualCellsList() const;
