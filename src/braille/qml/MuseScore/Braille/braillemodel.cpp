@@ -139,10 +139,6 @@ void BrailleModel::load()
 {
     TRACEFUNC;
 
-    if (notationBraille()) {
-        notationBraille()->setMode(BrailleMode::Navigation);
-    }
-
     onCurrentNotationChanged();
     context()->currentNotationChanged().onNotify(this, [this]() {
         onCurrentNotationChanged();

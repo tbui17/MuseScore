@@ -511,7 +511,7 @@ static QString dotsAnnouncement(const QString& pattern)
             }
         }
         if (!dots.isEmpty()) {
-            cells << dots.join('-');
+            cells << dots.join(' ');
         }
     }
 
