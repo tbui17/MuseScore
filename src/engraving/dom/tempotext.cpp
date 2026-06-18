@@ -434,11 +434,22 @@ String TempoText::duration2userName(const TDuration t)
 String TempoText::accessibleInfo() const
 {
     String info = tempoInfo();
-    if (info.empty()) {
-        return TextBase::accessibleInfo();
+    int bpm = int(lrint(tempo().toBPM().val));
+    String bpmInfo = muse::mtrc("engraving", "%1 BPM").arg(bpm);
+
+    if (bpm <= 0) {
+        if (info.empty()) {
+            return TextBase::accessibleInfo();
+        }
+
+        return String(u"%1: %2").arg(EngravingItem::accessibleInfo(), info);
     }
 
-    return String(u"%1: %2").arg(EngravingItem::accessibleInfo(), info);
+    if (info.empty()) {
+        return String(u"%1; %2").arg(TextBase::accessibleInfo(), bpmInfo);
+    }
+
+    return String(u"%1: %2; %3").arg(EngravingItem::accessibleInfo(), info, bpmInfo);
 }
 
 String TempoText::tempoInfo() const
