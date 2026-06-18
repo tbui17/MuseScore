@@ -1417,6 +1417,12 @@ const UiActionList NotationUiActions::s_actions = {
              TranslatableString("action", "Tempo &marking"),
              TranslatableString("action", "Add text: tempo marking")
              ),
+    UiAction("announce-selection-details",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Announce selection details"),
+             TranslatableString("action", "Announce details for the current selection")
+             ),
     UiAction("current-tempo",
              mu::context::UiCtxProjectOpened,
              mu::context::CTX_NOTATION_OPENED,

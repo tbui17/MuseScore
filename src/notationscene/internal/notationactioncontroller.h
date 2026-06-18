@@ -128,6 +128,7 @@ private:
     void insertClef(mu::engraving::ClefType type);
 
     void addText(TextStyleType type);
+    void announceSelectionDetails();
     void announceCurrentTempo();
     void openSetTempoDialog();
     mu::engraving::EngravingItem* tempoTargetItem() const;

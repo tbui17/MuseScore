@@ -402,6 +402,7 @@ void NotationActionController::init()
     registerAction("nashville-number-text", [this]() { addText(TextStyleType::HARMONY_NASHVILLE); });
     registerAction("lyrics", [this]() { addText(TextStyleType::LYRICS_ODD); });
     registerAction("tempo", [this]() { addText(TextStyleType::TEMPO); });
+    registerAction("announce-selection-details", [this]() { announceSelectionDetails(); });
     registerAction("current-tempo", [this]() { announceCurrentTempo(); });
     registerAction("set-tempo", [this]() { openSetTempoDialog(); });
 
@@ -1549,6 +1550,22 @@ void NotationActionController::announceCurrentTempo()
 
     int bpm = boundedTempoBpm(static_cast<int>(std::lround(score->tempo(tick).toBPM().val)));
     accessibilityController()->announce(muse::qtrc("notation", "Current tempo: %1 BPM").arg(bpm));
+}
+
+void NotationActionController::announceSelectionDetails()
+{
+    INotationPtr notation = currentNotation();
+    if (!notation || !notation->accessibility()) {
+        return;
+    }
+
+    const std::string& info = notation->accessibility()->accessibilityInfo().val;
+    if (info.empty()) {
+        accessibilityController()->announce(muse::qtrc("notation", "No selection"));
+        return;
+    }
+
+    accessibilityController()->announce(QString::fromStdString(info));
 }
 
 void NotationActionController::openSetTempoDialog()
