@@ -1423,6 +1423,12 @@ const UiActionList NotationUiActions::s_actions = {
              TranslatableString("action", "Announce selection details"),
              TranslatableString("action", "Announce details for the current selection")
              ),
+    UiAction("announce-position",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Announce current position"),
+             TranslatableString("action", "Announce the current track, staff, voice, measure, and beat")
+             ),
     UiAction("current-tempo",
              mu::context::UiCtxProjectOpened,
              mu::context::CTX_NOTATION_OPENED,

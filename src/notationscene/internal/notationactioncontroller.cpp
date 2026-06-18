@@ -24,7 +24,11 @@
 #include "io/file.h"
 
 #include "engraving/dom/masterscore.h"
+#include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
+#include "engraving/dom/part.h"
+#include "engraving/dom/segment.h"
+#include "engraving/dom/staff.h"
 #include "engraving/dom/text.h"
 #include "engraving/dom/sig.h"
 #include "notation/notationtypes.h"
@@ -403,6 +407,7 @@ void NotationActionController::init()
     registerAction("lyrics", [this]() { addText(TextStyleType::LYRICS_ODD); });
     registerAction("tempo", [this]() { addText(TextStyleType::TEMPO); });
     registerAction("announce-selection-details", [this]() { announceSelectionDetails(); });
+    registerAction("announce-position", [this]() { announcePosition(); });
     registerAction("current-tempo", [this]() { announceCurrentTempo(); });
     registerAction("set-tempo", [this]() { openSetTempoDialog(); });
 
@@ -1566,6 +1571,87 @@ void NotationActionController::announceSelectionDetails()
     }
 
     accessibilityController()->announce(QString::fromStdString(info));
+}
+
+void NotationActionController::announcePosition()
+{
+    mu::engraving::Score* score = currentNotationScore();
+    auto interaction = currentNotationInteraction();
+    if (!score || !interaction) {
+        return;
+    }
+
+    Fraction tick;
+    staff_idx_t staffIdx = muse::nidx;
+    int voice = -1;
+    EngravingItem* refItem = nullptr;
+
+    const INotationSelectionPtr sel = interaction->selection();
+    if (sel && sel->isRange()) {
+        const INotationSelectionRangePtr range = sel->range();
+        if (range) {
+            tick = range->startTick();
+            staffIdx = range->startStaffIndex();
+        }
+    }
+
+    if (staffIdx == muse::nidx) {
+        refItem = interaction->contextItem();
+        if (refItem) {
+            tick = refItem->tick();
+            staffIdx = refItem->staffIdx();
+            voice = refItem->voice();
+        } else {
+            tick = score->pos();
+        }
+    }
+
+    mu::engraving::Measure* measure = score->tick2measure(tick);
+    if (!measure) {
+        accessibilityController()->announce(muse::qtrc("notation", "No score position"));
+        return;
+    }
+
+    if (!refItem) {
+        refItem = score->tick2segment(tick);
+    }
+
+    QStringList parts;
+
+    if (staffIdx != muse::nidx) {
+        const mu::engraving::Staff* staff = score->staff(staffIdx);
+        if (staff && staff->part()) {
+            QString partName = staff->part()->longName(tick);
+            if (partName.isEmpty()) {
+                partName = staff->part()->partName();
+            }
+            if (partName.isEmpty()) {
+                partName = muse::qtrc("notation", "Track %1").arg(staffIdx + 1);
+            }
+            parts << muse::qtrc("notation", "Track: %1").arg(partName);
+            parts << muse::qtrc("notation", "Staff: %1").arg(staffIdx + 1);
+        }
+    }
+
+    if (voice >= 0) {
+        parts << muse::qtrc("notation", "Voice: %1").arg(voice + 1);
+    }
+
+    if (refItem) {
+        const QString barsAndBeats = refItem->formatBarsAndBeats();
+        if (!barsAndBeats.isEmpty()) {
+            parts << barsAndBeats;
+        }
+    } else {
+        parts << muse::qtrc("notation", "Measure: %1").arg(measure->measureNumber() + 1);
+    }
+
+    if (parts.isEmpty()) {
+        accessibilityController()->announce(muse::qtrc("notation", "No score position"));
+        return;
+    }
+
+    accessibilityController()->announce(parts.join("; "));
 }
 
 void NotationActionController::openSetTempoDialog()

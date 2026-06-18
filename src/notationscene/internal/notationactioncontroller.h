@@ -129,6 +129,7 @@ private:
 
     void addText(TextStyleType type);
     void announceSelectionDetails();
+    void announcePosition();
     void announceCurrentTempo();
     void openSetTempoDialog();
     mu::engraving::EngravingItem* tempoTargetItem() const;
