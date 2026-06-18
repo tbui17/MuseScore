@@ -52,6 +52,8 @@ using namespace mu::project;
 
 static const ActionCode PLAY_CODE("play");
 static const ActionCode PLAY_FROM_SELECTION("play-from-selection");
+static const ActionCode PLAY_CURRENT_MEASURE_CODE("play-current-measure");
+static const ActionCode PLAY_CURRENT_BEAT_CODE("play-current-beat");
 static const ActionCode PAUSE_CODE("pause");
 static const ActionCode STOP_CODE("stop");
 static const ActionCode PAUSE_AND_SELECT_CODE("pause-and-select");
@@ -109,6 +111,8 @@ void PlaybackController::init()
 {
     dispatcher()->reg(this, PLAY_CODE, [this]() { PlaybackController::togglePlay(); });
     dispatcher()->reg(this, PLAY_FROM_SELECTION, [this]() { PlaybackController::playFromSelection(); });
+    dispatcher()->reg(this, PLAY_CURRENT_MEASURE_CODE, this, &PlaybackController::playCurrentMeasure);
+    dispatcher()->reg(this, PLAY_CURRENT_BEAT_CODE, this, &PlaybackController::playCurrentBeat);
     dispatcher()->reg(this, PAUSE_CODE, [this]() { PlaybackController::pause(/*select*/ false); });
     dispatcher()->reg(this, PAUSE_AND_SELECT_CODE, [this]() { PlaybackController::pause(/*select*/ true); });
     dispatcher()->reg(this, STOP_CODE, this, &PlaybackController::stop);
@@ -697,13 +701,13 @@ void PlaybackController::playFromSelection(bool showErrors)
     }
 }
 
-void PlaybackController::play()
+void PlaybackController::play(bool applyLoopStart)
 {
     IF_ASSERT_FAILED(currentPlayer()) {
         return;
     }
 
-    if (isLoopEnabled()) {
+    if (applyLoopStart && isLoopEnabled()) {
         secs_t startSecs = playbackStartSecs();
         seek(startSecs);
     }
@@ -724,6 +728,91 @@ void PlaybackController::play()
 
         currentPlayer()->play(delay);
     });
+}
+
+void PlaybackController::playOneShotRange(const secs_t startSecs, const secs_t endSecs)
+{
+    IF_ASSERT_FAILED(currentPlayer()) {
+        return;
+    }
+
+    m_oneShotEndSecs.reset();
+
+    if (endSecs <= startSecs) {
+        updateLoop();
+        return;
+    }
+
+    m_oneShotEndSecs = endSecs;
+    currentPlayer()->resetLoop();
+    seek(startSecs);
+    notationPlayback()->sendEventsForChangedTracks();
+
+    if (isPaused()) {
+        resume();
+    } else if (!isPlaying()) {
+        play(false /*applyLoopStart*/);
+    }
+}
+
+void PlaybackController::playCurrentMeasure()
+{
+    doPlayCurrentMeasure();
+}
+
+void PlaybackController::doPlayCurrentMeasure(bool showErrors)
+{
+    if (!isPlayAllowed()) {
+        LOGW() << "playback not allowed";
+        return;
+    }
+
+    if (showErrors && m_onlineSoundsController->shouldShowOnlineSoundsProcessingError(isPlaying())) {
+        m_onlineSoundsController->showOnlineSoundsProcessingError([this]() { doPlayCurrentMeasure(false /*showErrors*/); });
+        return;
+    }
+
+    interaction()->endEditElement();
+    interaction()->noteInput()->endNoteInput();
+
+    const MeasureBeat beat = currentBeat();
+    const secs_t startSecs = beatToSecs(beat.measureIndex, 0);
+    const secs_t endSecs = beat.measureIndex < beat.maxMeasureIndex ? beatToSecs(beat.measureIndex + 1, 0) : totalPlayTime();
+    playOneShotRange(startSecs, endSecs);
+}
+
+void PlaybackController::playCurrentBeat()
+{
+    doPlayCurrentBeat();
+}
+
+void PlaybackController::doPlayCurrentBeat(bool showErrors)
+{
+    if (!isPlayAllowed()) {
+        LOGW() << "playback not allowed";
+        return;
+    }
+
+    if (showErrors && m_onlineSoundsController->shouldShowOnlineSoundsProcessingError(isPlaying())) {
+        m_onlineSoundsController->showOnlineSoundsProcessingError([this]() { doPlayCurrentBeat(false /*showErrors*/); });
+        return;
+    }
+
+    interaction()->endEditElement();
+    interaction()->noteInput()->endNoteInput();
+
+    const MeasureBeat beat = currentBeat();
+    const int beatIndex = static_cast<int>(beat.beat);
+    const secs_t startSecs = beatToSecs(beat.measureIndex, beatIndex);
+    secs_t endSecs = totalPlayTime();
+
+    if (beatIndex < beat.maxBeatIndex) {
+        endSecs = beatToSecs(beat.measureIndex, beatIndex + 1);
+    } else if (beat.measureIndex < beat.maxMeasureIndex) {
+        endSecs = beatToSecs(beat.measureIndex + 1, 0);
+    }
+
+    playOneShotRange(startSecs, endSecs);
 }
 
 void PlaybackController::rewind(const ActionData& args)
@@ -760,7 +849,13 @@ void PlaybackController::stop()
         return;
     }
 
+    const bool wasOneShotPlayback = m_oneShotEndSecs.has_value();
+    m_oneShotEndSecs.reset();
     currentPlayer()->stop();
+
+    if (wasOneShotPlayback) {
+        updateLoop();
+    }
 }
 
 void PlaybackController::resume()
@@ -1057,6 +1152,7 @@ void PlaybackController::resetPlayback()
     m_seqAsyncReceiver.async_disconnectAll();
 
     m_currentTick = 0;
+    m_oneShotEndSecs.reset();
 
     playback()->deinit();
 
@@ -1483,7 +1579,7 @@ void PlaybackController::setupPlayer()
 
         updateCurrentTempo();
 
-        secs_t endSecs = totalPlayTime();
+        secs_t endSecs = m_oneShotEndSecs.value_or(totalPlayTime());
         if (pos + muse::msecs_to_secs(1) >= endSecs) {
             stop();
         }
@@ -1810,6 +1906,8 @@ bool PlaybackController::canReceiveAction(const ActionCode& code) const
 
     static const std::unordered_set<ActionCode> REQUIRES_MEASURES {
         PLAY_CODE,
+        PLAY_CURRENT_MEASURE_CODE,
+        PLAY_CURRENT_BEAT_CODE,
         PAUSE_CODE,
         PAUSE_AND_SELECT_CODE,
         STOP_CODE,

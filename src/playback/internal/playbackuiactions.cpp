@@ -33,6 +33,8 @@ using namespace muse::ui;
 using namespace muse::actions;
 
 static const ActionCode PLAY_FROM_SELECTION_CODE("play-from-selection");
+static const ActionCode PLAY_CURRENT_MEASURE_CODE("play-current-measure");
+static const ActionCode PLAY_CURRENT_BEAT_CODE("play-current-beat");
 static const ActionCode CLEAR_ONLINE_SOUNDS_CACHE_CODE("clear-online-sounds-cache");
 
 const UiActionList PlaybackUiActions::s_mainActions = {
@@ -48,6 +50,20 @@ const UiActionList PlaybackUiActions::s_mainActions = {
              mu::context::CTX_NOTATION_OPENED,
              TranslatableString("action", "Play from selection"),
              TranslatableString("action", "Play from selection"),
+             IconCode::Code::PLAY
+             ),
+    UiAction(PLAY_CURRENT_MEASURE_CODE,
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Play current measure"),
+             TranslatableString("action", "Play the current measure"),
+             IconCode::Code::PLAY
+             ),
+    UiAction(PLAY_CURRENT_BEAT_CODE,
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Play current beat"),
+             TranslatableString("action", "Play the current beat"),
              IconCode::Code::PLAY
              ),
     UiAction("pause",

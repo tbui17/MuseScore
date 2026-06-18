@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "modularity/ioc.h"
 #include "async/asyncable.h"
 #include "actions/iactionsdispatcher.h"
@@ -101,6 +103,8 @@ public:
 
     void seekElement(const notation::EngravingItem* element, bool flushSound = true) override;
     void seekBeat(int measureIndex, int beatIndex, bool flushSound = true) override;
+    void playCurrentMeasure() override;
+    void playCurrentBeat() override;
 
     bool actionChecked(const muse::actions::ActionCode& actionCode) const override;
     muse::async::Channel<muse::actions::ActionCode> actionCheckedChanged() const override;
@@ -172,7 +176,10 @@ private:
     void togglePlay(bool showErrors = true);
     void playFromSelection(bool showErrors = true);
     void rewind(const muse::actions::ActionData& args);
-    void play();
+    void play(bool applyLoopStart = true);
+    void playOneShotRange(const muse::audio::secs_t startSecs, const muse::audio::secs_t endSecs);
+    void doPlayCurrentMeasure(bool showErrors = true);
+    void doPlayCurrentBeat(bool showErrors = true);
     void pause(bool select = false);
     void stop();
     void resume();
@@ -260,6 +267,7 @@ private:
 
     bool m_isExportingAudio = false;
     bool m_isRangeSelection = false;
+    std::optional<muse::audio::secs_t> m_oneShotEndSecs;
 
     DrumsetLoader m_drumsetLoader;
     std::unique_ptr<OnlineSoundsController> m_onlineSoundsController;

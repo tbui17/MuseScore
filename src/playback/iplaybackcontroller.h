@@ -94,6 +94,8 @@ public:
 
     virtual void seekElement(const notation::EngravingItem* element, bool flushSound = true) = 0;
     virtual void seekBeat(int measureIndex, int beatIndex, bool flushSound = true) = 0;
+    virtual void playCurrentMeasure() = 0;
+    virtual void playCurrentBeat() = 0;
 
     virtual bool actionChecked(const muse::actions::ActionCode& actionCode) const = 0;
     virtual muse::async::Channel<muse::actions::ActionCode> actionCheckedChanged() const = 0;

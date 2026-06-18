@@ -137,6 +137,14 @@ void PlaybackControllerStub::seekBeat(int, int, bool)
 {
 }
 
+void PlaybackControllerStub::playCurrentMeasure()
+{
+}
+
+void PlaybackControllerStub::playCurrentBeat()
+{
+}
+
 bool PlaybackControllerStub::actionChecked(const ActionCode&) const
 {
     return false;

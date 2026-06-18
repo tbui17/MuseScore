@@ -70,6 +70,8 @@ public:
 
     MOCK_METHOD(void, seekElement, (const notation::EngravingItem*, bool), (override));
     MOCK_METHOD(void, seekBeat, (int, int, bool), (override));
+    MOCK_METHOD(void, playCurrentMeasure, (), (override));
+    MOCK_METHOD(void, playCurrentBeat, (), (override));
 
     MOCK_METHOD(bool, actionChecked, (const muse::actions::ActionCode&), (const, override));
     MOCK_METHOD(muse::async::Channel<muse::actions::ActionCode>, actionCheckedChanged, (), (const, override));
