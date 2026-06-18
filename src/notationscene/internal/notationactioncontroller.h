@@ -33,6 +33,7 @@
 #include "context/iglobalcontext.h"
 #include "context/iuicontextresolver.h"
 #include "playback/iplaybackcontroller.h"
+#include "accessibility/iaccessibilitycontroller.h"
 #include "engraving/iengravingconfiguration.h"
 #include "notation/inotationconfiguration.h"
 
@@ -50,6 +51,7 @@ class NotationActionController : public muse::actions::Actionable, public muse::
     muse::ContextInject<context::IUiContextResolver> uiContextResolver = { this };
     muse::ContextInject<muse::IInteractive> interactive = { this };
     muse::ContextInject<playback::IPlaybackController> playbackController = { this };
+    muse::ContextInject<muse::accessibility::IAccessibilityController> accessibilityController = { this };
 
 public:
 
@@ -126,6 +128,10 @@ private:
     void insertClef(mu::engraving::ClefType type);
 
     void addText(TextStyleType type);
+    void announceCurrentTempo();
+    void openSetTempoDialog();
+    mu::engraving::EngravingItem* tempoTargetItem() const;
+    bool currentTempoTick(Fraction& tick) const;
     void addImage();
     void addFiguredBass();
     void addGuitarBend(GuitarBendType bendType);

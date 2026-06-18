@@ -202,6 +202,7 @@ qt_add_qml_module(notationscene_qml
         PianoKeyboardPanel.qml
         SelectionFilterPanel.qml
         SelectMeasuresCountDialog.qml
+        TempoDialog.qml
         styledialog/AccidentalsPage.qml
         styledialog/BeamsPage.qml
         styledialog/BendsPage.qml

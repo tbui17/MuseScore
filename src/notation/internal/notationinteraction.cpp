@@ -87,6 +87,7 @@
 #include "engraving/dom/stafftype.h"
 #include "engraving/dom/stafftypechange.h"
 #include "engraving/dom/system.h"
+#include "engraving/dom/tempotext.h"
 #include "engraving/dom/tuplet.h"
 #include "engraving/dom/utils.h"
 #include "engraving/editing/editchord.h"
@@ -6319,6 +6320,54 @@ void NotationInteraction::addTextToItem(TextStyleType type, EngravingItem* item)
     }
 
     addText(type, item);
+}
+
+bool NotationInteraction::setTempoAtCurrentPosition(int bpm)
+{
+    if (!scoreHasMeasure()) {
+        LOGE() << "Need to create measure";
+        return false;
+    }
+
+    EngravingItem* item = nullptr;
+    if (m_selection->isRange()) {
+        const INotationSelectionRangePtr range = m_selection->range();
+        if (range && range->rangeStartSegment()) {
+            item = range->rangeStartSegment()->firstElementForNavigation(range->startStaffIndex());
+        }
+    } else {
+        item = contextItem();
+    }
+
+    if (!canAddTextToItem(TextStyleType::TEMPO, item)) {
+        MScore::setError(MsError::NO_NOTE_REST_SELECTED);
+        checkAndShowError();
+        return false;
+    }
+
+    if (m_noteInput->isNoteInputMode()) {
+        m_noteInput->endNoteInput();
+    }
+
+    startEdit(TranslatableString("undoableAction", "Set tempo"));
+
+    TextBase* text = score()->addText(TextStyleType::TEMPO, item);
+    if (!text || !text->isTempoText()) {
+        rollback();
+        return false;
+    }
+
+    TempoText* tempoText = toTempoText(text);
+    String tempoTextXml = tempoText->xmlText();
+    tempoTextXml.replace(String(u"80"), String::number(bpm));
+    tempoText->setXmlText(tempoTextXml);
+    tempoText->setFollowText(true);
+    tempoText->updateTempo();
+
+    apply();
+    showItem(tempoText);
+
+    return true;
 }
 
 void NotationInteraction::addText(TextStyleType type, EngravingItem* item)

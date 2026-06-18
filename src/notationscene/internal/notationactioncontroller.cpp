@@ -34,6 +34,9 @@
 #include "translation.h"
 #include "log.h"
 
+#include <cmath>
+#include <set>
+
 #include <QGuiApplication>
 
 using namespace mu;
@@ -49,8 +52,41 @@ static constexpr bool NEAR_NOTE_OR_REST = true;
 
 static constexpr bool DONT_PLAY_CHORD = false;
 
+static constexpr int MIN_TEMPO_BPM = 5;
+static constexpr int MAX_TEMPO_BPM = 999;
+
 static const ActionCode UNDO_ACTION_CODE = "action://notation/undo";
 static const ActionCode REDO_ACTION_CODE = "action://notation/redo";
+
+static int boundedTempoBpm(int bpm)
+{
+    if (bpm < MIN_TEMPO_BPM) {
+        return MIN_TEMPO_BPM;
+    }
+
+    if (bpm > MAX_TEMPO_BPM) {
+        return MAX_TEMPO_BPM;
+    }
+
+    return bpm;
+}
+
+static bool canAddTempoToItem(const EngravingItem* item)
+{
+    if (!item) {
+        return false;
+    }
+
+    static const std::set<ElementType> requiredElementTypes {
+        ElementType::NOTE,
+        ElementType::REST,
+        ElementType::MMREST,
+        ElementType::MEASURE_REPEAT,
+        ElementType::CHORD,
+    };
+
+    return muse::contains(requiredElementTypes, item->type());
+}
 
 static const QMap<ActionCode, Fraction> DURATIONS_FOR_TEXT_NAVIGATION {
     { "advance-longa", Fraction(4, 1) },
@@ -366,6 +402,8 @@ void NotationActionController::init()
     registerAction("nashville-number-text", [this]() { addText(TextStyleType::HARMONY_NASHVILLE); });
     registerAction("lyrics", [this]() { addText(TextStyleType::LYRICS_ODD); });
     registerAction("tempo", [this]() { addText(TextStyleType::TEMPO); });
+    registerAction("current-tempo", [this]() { announceCurrentTempo(); });
+    registerAction("set-tempo", [this]() { openSetTempoDialog(); });
 
     registerAction("figured-bass", [this]() { addFiguredBass(); });
 
@@ -1494,6 +1532,89 @@ void NotationActionController::addText(TextStyleType type)
     }
 
     interaction->addTextToItem(type, item);
+}
+
+void NotationActionController::announceCurrentTempo()
+{
+    mu::engraving::Score* score = currentNotationScore();
+    if (!score) {
+        return;
+    }
+
+    Fraction tick;
+    if (!currentTempoTick(tick)) {
+        accessibilityController()->announce(muse::qtrc("notation", "No score position selected"));
+        return;
+    }
+
+    int bpm = boundedTempoBpm(static_cast<int>(std::lround(score->tempo(tick).toBPM().val)));
+    accessibilityController()->announce(muse::qtrc("notation", "Current tempo: %1 BPM").arg(bpm));
+}
+
+void NotationActionController::openSetTempoDialog()
+{
+    if (!canAddTempoToItem(tempoTargetItem())) {
+        accessibilityController()->announce(muse::qtrc("notation", "Select a note or rest to set tempo"));
+        return;
+    }
+
+    interactive()->open("musescore://notation/settempo")
+    .onResolve(this, [this](const Val& v) {
+        int bpm = boundedTempoBpm(v.toInt());
+        auto interaction = currentNotationInteraction();
+        if (!interaction) {
+            return;
+        }
+
+        if (interaction->setTempoAtCurrentPosition(bpm)) {
+            accessibilityController()->announce(muse::qtrc("notation", "Tempo set to %1 BPM").arg(bpm));
+        } else {
+            accessibilityController()->announce(muse::qtrc("notation", "Select a note or rest to set tempo"));
+        }
+    });
+}
+
+EngravingItem* NotationActionController::tempoTargetItem() const
+{
+    auto interaction = currentNotationInteraction();
+    if (!interaction) {
+        return nullptr;
+    }
+
+    const INotationSelectionPtr sel = interaction->selection();
+    if (sel && sel->isRange()) {
+        const INotationSelectionRangePtr range = sel->range();
+        return range && range->rangeStartSegment() ? range->rangeStartSegment()->firstElementForNavigation(range->startStaffIndex()) : nullptr;
+    }
+
+    return interaction->contextItem();
+}
+
+bool NotationActionController::currentTempoTick(Fraction& tick) const
+{
+    auto interaction = currentNotationInteraction();
+    if (!interaction) {
+        return false;
+    }
+
+    const INotationSelectionPtr sel = interaction->selection();
+    if (sel && sel->isRange()) {
+        const INotationSelectionRangePtr range = sel->range();
+        if (!range) {
+            return false;
+        }
+
+        tick = range->startTick();
+        return true;
+    }
+
+    EngravingItem* item = interaction->contextItem();
+    if (!item) {
+        return false;
+    }
+
+    tick = item->tick();
+    return true;
 }
 
 void NotationActionController::addImage()

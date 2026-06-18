@@ -258,6 +258,7 @@ public:
 
     void addTextToTopFrame(TextStyleType type) override;
     void addTextToItem(TextStyleType type, EngravingItem* item) override;
+    bool setTempoAtCurrentPosition(int bpm) override;
 
     muse::Ret canAddImageToItem(const EngravingItem* item) const override;
     void addImageToItem(const muse::io::path_t& imagePath, EngravingItem* item) override;

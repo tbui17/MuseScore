@@ -1417,6 +1417,18 @@ const UiActionList NotationUiActions::s_actions = {
              TranslatableString("action", "Tempo &marking"),
              TranslatableString("action", "Add text: tempo marking")
              ),
+    UiAction("current-tempo",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Current tempo"),
+             TranslatableString("action", "Announce tempo at cursor position")
+             ),
+    UiAction("set-tempo",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Set tempo"),
+             TranslatableString("action", "Set tempo at cursor position")
+             ),
     UiAction("duplet",
              mu::context::UiCtxProjectOpened,
              mu::context::CTX_NOTATION_FOCUSED,
