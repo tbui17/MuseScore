@@ -65,6 +65,9 @@ void NotationBraille::init()
     brailleConfiguration()->braillePanelEnabledChanged().onNotify(this, [this]() {
         bool enabled = brailleConfiguration()->braillePanelEnabled();
         setEnabled(enabled);
+        if (enabled) {
+            doBraille(true);
+        }
     });
 
     updateTableForLyricsFromPreferences();
@@ -130,61 +133,77 @@ void NotationBraille::updateTableForLyricsFromPreferences()
 
 void NotationBraille::doBraille(bool force)
 {
-    if (brailleConfiguration()->braillePanelEnabled()) {
-        EngravingItem* e = nullptr;
-        Measure* m = nullptr;
+    if (!notation()) {
+        return;
+    }
 
-        if (selection()->isSingle()) {
-            e = selection()->element();
-            LOGD() << " selected " << e->accessibleInfo();
-            m = e->findMeasure();
-        } else if (selection()->isRange()) {
-            for (auto el: selection()->elements()) {
-                if (el->isMeasure()) {
-                    m = toMeasure(el);
-                    break;
-                } else {
-                    m = el->findMeasure();
-                    if (m) {
-                        break;
-                    }
-                }
-            }
-            e = m ? m : selection()->elements().front();
-        } else if (selection()->isList()) {
-            e = selection()->elements().front();
-            m = e->findMeasure();
-        }
-        if (e) {
-            setCurrentEngravingItem(e, false);
+    EngravingItem* e = nullptr;
+    Measure* m = nullptr;
 
-            if (!m) {
-                brailleEngravingItemList()->clear();
-                Braille lb(score());
-                bool res = lb.convertItem(e, brailleEngravingItemList());
-                if (!res) {
-                    QString txt = e->accessibleInfo();
-                    std::string braille = braille_long_translate(table_for_literature.c_str(), txt.toStdString());
-                    brailleEngravingItemList()->setBrailleStr(QString::fromStdString(braille));
-                    setBrailleInfo(QString::fromStdString(braille));
-                } else {
-                    setBrailleInfo(brailleEngravingItemList()->brailleStr());
-                }
-                current_measure = nullptr;
+    if (selection()->isSingle()) {
+        e = selection()->element();
+        LOGD() << " selected " << e->accessibleInfo();
+        m = e->findMeasure();
+    } else if (selection()->isRange()) {
+        for (auto el: selection()->elements()) {
+            if (el->isMeasure()) {
+                m = toMeasure(el);
+                break;
             } else {
-                if (m != current_measure || force) {
-                    brailleEngravingItemList()->clear();
-                    Braille lb(score());
-                    lb.convertMeasure(m, brailleEngravingItemList());
-                    setBrailleInfo(brailleEngravingItemList()->brailleStr());
-                    current_measure = m;
-                }
-                current_bei = brailleEngravingItemList()->getItem(e);
-                if (current_bei != nullptr) {
-                    setCurrentItemPosition(current_bei->start(), current_bei->end());
+                m = el->findMeasure();
+                if (m) {
+                    break;
                 }
             }
         }
+        e = m ? m : selection()->elements().front();
+    } else if (selection()->isList()) {
+        e = selection()->elements().front();
+        m = e->findMeasure();
+    }
+
+    if (!e) {
+        return;
+    }
+
+    const Measure* previousMeasure = current_measure;
+    setCurrentEngravingItem(e, false);
+    current_measure = m;
+
+    if (!brailleConfiguration()->braillePanelEnabled()) {
+        current_bei = nullptr;
+        setCurrentItemPosition(-1, -1);
+        brailleEngravingItemList()->clear();
+        return;
+    }
+
+    if (!m) {
+        brailleEngravingItemList()->clear();
+        Braille lb(score());
+        bool res = lb.convertItem(e, brailleEngravingItemList());
+        if (!res) {
+            QString txt = e->accessibleInfo();
+            std::string braille = braille_long_translate(table_for_literature.c_str(), txt.toStdString());
+            brailleEngravingItemList()->setBrailleStr(QString::fromStdString(braille));
+            setBrailleInfo(QString::fromStdString(braille));
+        } else {
+            setBrailleInfo(brailleEngravingItemList()->brailleStr());
+        }
+        current_measure = nullptr;
+        return;
+    }
+
+    if (m != previousMeasure || force || brailleEngravingItemList()->isEmpty()) {
+        brailleEngravingItemList()->clear();
+        Braille lb(score());
+        lb.convertMeasure(m, brailleEngravingItemList());
+        setBrailleInfo(brailleEngravingItemList()->brailleStr());
+        current_measure = m;
+    }
+
+    current_bei = brailleEngravingItemList()->getItem(e);
+    if (current_bei != nullptr) {
+        setCurrentItemPosition(current_bei->start(), current_bei->end());
     }
 }
 
