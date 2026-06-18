@@ -758,27 +758,38 @@ void NotationBraille::setKeys(const QString& sequence)
                 brailleInput()->setOctave(brailleInput()->addedOctave(), true);
             }
 
+            QStringList operationAnnouncements;
+
             if (brailleInput()->longSlurStart()) {
                 if (brailleInput()->longSlurStartNote() == NULL) {
                     if (currentEngravingItem() != NULL && currentEngravingItem()->isNote()) {
                         Note* currentNote = toNote(currentEngravingItem());
                         brailleInput()->setLongSlurStartNote(currentNote);
+                        operationAnnouncements << muse::qtrc("braille/notation", "Slur started");
                     }
                 }
             }
 
             if (brailleInput()->tieStartNote() != NULL) {
-                addTie();
+                operationAnnouncements << (addTie()
+                                           ? muse::qtrc("braille/notation", "Tie added")
+                                           : muse::qtrc("braille/notation", "Could not add tie"));
                 brailleInput()->clearTie();
             }
 
             if (brailleInput()->slurStartNote() != NULL) {
-                addSlur();
+                operationAnnouncements << (addSlur()
+                                           ? muse::qtrc("braille/notation", "Slur added")
+                                           : muse::qtrc("braille/notation", "Could not add slur"));
                 brailleInput()->clearSlur();
             }
 
             playbackController()->playElements({ currentEngravingItem() });
-            accessibilityController()->announce(noteAnnouncement(brailleInput()));
+            QString announcement = noteAnnouncement(brailleInput());
+            if (!operationAnnouncements.isEmpty()) {
+                announcement += QStringLiteral("; ") + operationAnnouncements.join(QStringLiteral("; "));
+            }
+            accessibilityController()->announce(announcement);
             brailleInput()->reset();
             break;
         }
@@ -823,6 +834,7 @@ void NotationBraille::setKeys(const QString& sequence)
                 brailleInput()->setOctave(brailleInput()->addedOctave());
             }
             playbackController()->playElements({ currentEngravingItem() });
+            accessibilityController()->announce(muse::qtrc("braille/notation", "Interval added"));
             brailleInput()->reset();
             break;
         }
@@ -834,36 +846,50 @@ void NotationBraille::setKeys(const QString& sequence)
         }
         case BieSequencePatternType::Tie: {
             LOGD() << "tie";
+            bool tieStarted = false;
             if (brailleInput()->tie()) {
                 if (currentEngravingItem() != NULL && currentEngravingItem()->isNote()) {
                     Note* note = toNote(currentEngravingItem());
                     brailleInput()->setTieStartNote(note);
+                    tieStarted = true;
                 }
             }
+            accessibilityController()->announce(tieStarted
+                                                ? muse::qtrc("braille/notation", "Tie started")
+                                                : muse::qtrc("braille/notation", "Could not start tie"));
             brailleInput()->reset();
             break;
         }
         case BieSequencePatternType::NoteSlur: {
             LOGD() << "note slur";
+            bool slurStarted = false;
             if (brailleInput()->noteSlur()) {
                 if (brailleInput()->slurStartNote() == NULL) {
                     if (currentEngravingItem() != NULL && currentEngravingItem()->isNote()) {
                         Note* note = toNote(currentEngravingItem());
                         brailleInput()->setSlurStartNote(note);
+                        slurStarted = true;
                     }
                 }
             }
+            accessibilityController()->announce(slurStarted
+                                                ? muse::qtrc("braille/notation", "Slur started")
+                                                : muse::qtrc("braille/notation", "Could not start slur"));
             brailleInput()->reset();
             break;
         }
         case BieSequencePatternType::LongSlurStop: {
             LOGD() << "long slur stop";
+            bool slurAdded = false;
             if (brailleInput()->longSlurStop()) {
                 if (brailleInput()->longSlurStartNote() != NULL) {
-                    addLongSlur();
+                    slurAdded = addLongSlur();
                     brailleInput()->clearLongSlur();
                 }
             }
+            accessibilityController()->announce(slurAdded
+                                                ? muse::qtrc("braille/notation", "Slur added")
+                                                : muse::qtrc("braille/notation", "Could not add slur"));
             brailleInput()->reset();
             break;
         }
