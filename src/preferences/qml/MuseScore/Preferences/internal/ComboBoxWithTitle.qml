@@ -85,7 +85,7 @@ Row {
             dropdown.navigation.row = Qt.binding(function () { return root.navigationRow })
             dropdown.navigation.column = Qt.binding(function () { return root.navigationColumn })
             dropdown.navigation.accessible.name = Qt.binding(function() {
-                return root.title + " " + dropdown.currentText
+                return root.title + ": " + dropdown.currentText
             })
 
             dropdown.indeterminateText = ""

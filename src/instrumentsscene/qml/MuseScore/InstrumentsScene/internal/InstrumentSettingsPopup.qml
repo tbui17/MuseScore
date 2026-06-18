@@ -38,6 +38,9 @@ StyledPopupView {
 
     contentHeight: contentColumn.childrenRect.height
 
+    accessible.role: MUAccessible.Dialog
+    accessible.name: qsTrc("layoutpanel/instrumentsettingspopup", "Instrument settings")
+
     onOpened: {
         if (root.needActiveFirstItem) {
             instrNameField.navigation.requestActive()

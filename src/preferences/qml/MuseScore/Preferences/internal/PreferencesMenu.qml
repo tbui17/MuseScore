@@ -107,7 +107,7 @@ Item {
             navigation.panel: root.navigation
             navigation.row: navigationRow
             navigation.column: navigationColumn
-            navigation.accessible.name: title
+            navigation.accessible.name: qsTrc("preferences", "%1 page").arg(title)
             navigation.accessible.role: MUAccessible.ListItem
             navigation.onActiveChanged: {
                 if (navigation.active) {
