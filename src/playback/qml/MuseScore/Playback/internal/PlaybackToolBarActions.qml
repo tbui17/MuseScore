@@ -39,6 +39,11 @@ Item {
     readonly property int navigationOrderEnd: tempoLoader.navigationOrderEnd
 
     property bool floating: false
+    readonly property int speedPercent: Math.round(root.playbackModel.tempoMultiplier * 100)
+    readonly property string playbackSpeedAndTempoAccessibleName: qsTrc("playback", "Speed %1%; tempo %2 BPM")
+                                                                  .arg(root.speedPercent)
+                                                                  .arg(root.playbackModel.tempo.value)
+    readonly property string tempoAccessibleName: qsTrc("playback", "Tempo %1 BPM").arg(root.playbackModel.tempo.value)
 
     // Not `+ endSeparator.width`: this way, the separator itself is outside the view,
     // which means that it will be exactly at the position of the KDDockWidgets separator
@@ -195,6 +200,10 @@ Item {
                 implicitWidth: tempoLoader.tempoViewWidth
                 implicitHeight: root.height
 
+                navigation.panel: root.navPanel
+                navigation.order: measureAndBeatFields.navigationOrderEnd + 1
+                navigation.accessible.name: root.tempoAccessibleName
+
                 TempoView {
                     id: tempoView
                     anchors.right: parent.right
@@ -224,6 +233,7 @@ Item {
 
                 navigation.panel: root.navPanel
                 navigation.order: measureAndBeatFields.navigationOrderEnd + 1
+                accessible.name: root.playbackSpeedAndTempoAccessibleName
 
                 contentItem: TempoView {
                     anchors.centerIn: parent

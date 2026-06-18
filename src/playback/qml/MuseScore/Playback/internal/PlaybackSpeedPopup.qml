@@ -32,6 +32,7 @@ StyledPopupView {
     id: root
 
     property PlaybackToolBarModel playbackModel: null
+    readonly property int speedPercent: Math.round(root.playbackModel.tempoMultiplier * 100)
 
     contentWidth: contentColumn.implicitWidth
     contentHeight: contentColumn.implicitHeight
@@ -57,8 +58,10 @@ StyledPopupView {
             spacing: 12
 
             IncrementalPropertyControl {
+                id: speedControl
+
                 Layout.preferredWidth: 76
-                currentValue: root.playbackModel.tempoMultiplier * 100
+                currentValue: root.speedPercent
 
                 maxValue: 300
                 minValue: 10
@@ -67,7 +70,8 @@ StyledPopupView {
                 decimals: 0
 
                 navigation.panel: navPanel
-                navigation.accessible.name: qsTrc("playback", "Speed")
+                navigation.order: 0
+                navigation.accessible.name: qsTrc("playback", "Speed %1%").arg(root.speedPercent)
 
                 onValueEdited: function(newValue) {
                     root.playbackModel.tempoMultiplier = newValue / 100
@@ -84,6 +88,10 @@ StyledPopupView {
                 stepSize: 0.05
 
                 fillBackground: false
+
+                navigation.panel: navPanel
+                navigation.order: speedControl.navigation.order + 1
+                navigation.accessible.name: qsTrc("playback", "Speed %1%").arg(root.speedPercent)
 
                 onMoved: {
                     root.playbackModel.tempoMultiplier = value

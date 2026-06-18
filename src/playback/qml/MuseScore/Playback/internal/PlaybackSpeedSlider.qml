@@ -35,6 +35,7 @@ RowLayout {
 
     property NavigationPanel navigationPanel: null
     property int navigationOrderStart: 0
+    readonly property int speedPercent: Math.round(root.playbackModel.tempoMultiplier * 100)
 
     spacing: 12
 
@@ -51,7 +52,7 @@ RowLayout {
         id: speedControl
 
         Layout.preferredWidth: 76
-        currentValue: root.playbackModel.tempoMultiplier * 100
+        currentValue: root.speedPercent
 
         maxValue: 300
         minValue: 10
@@ -61,7 +62,7 @@ RowLayout {
 
         navigation.panel: root.navigationPanel
         navigation.order: root.navigationOrderStart
-        navigation.accessible.name: qsTrc("playback", "Speed")
+        navigation.accessible.name: qsTrc("playback", "Speed %1%").arg(root.speedPercent)
 
         onValueEdited: function(newValue) {
             root.playbackModel.tempoMultiplier = newValue / 100
@@ -82,6 +83,7 @@ RowLayout {
 
         navigation.panel: root.navigationPanel
         navigation.order: speedControl.navigation.order + 1
+        navigation.accessible.name: qsTrc("playback", "Speed %1%").arg(root.speedPercent)
 
         onMoved: {
             root.playbackModel.tempoMultiplier = value

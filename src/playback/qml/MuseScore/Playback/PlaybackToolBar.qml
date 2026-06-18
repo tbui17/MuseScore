@@ -92,6 +92,7 @@ Item {
 
                     navigation.panel: navPanel
                     navigation.order: playbackActions.navigationOrderEnd + 1
+                    navigation.accessible.name: qsTrc("playback", "Playback position %1%").arg(Math.round(thePlaybackModel.playPosition * 100))
 
                     onMoved: {
                         thePlaybackModel.playPosition = value
