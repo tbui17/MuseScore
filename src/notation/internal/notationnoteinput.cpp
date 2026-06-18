@@ -435,6 +435,7 @@ void NotationNoteInput::setNoteInputMethod(NoteInputMethod method)
     }
 
     notifyAboutStateChanged();
+    accessibilityController()->announce(nameOfNoteInputMethod(method).translated());
 }
 
 void NotationNoteInput::addNote(const NoteInputParams& params, NoteAddingMode addingMode)
