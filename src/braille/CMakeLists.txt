@@ -34,6 +34,20 @@ target_link_libraries(braille PRIVATE
     liblouis
 )
 
+if (OS_IS_WIN AND NOT CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(BRAILLE_TABLES_OUTPUT_DIR "${CMAKE_BINARY_DIR}/../tables")
+    add_custom_command(TARGET braille POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${BRAILLE_TABLES_OUTPUT_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/liblouis/tables"
+            "${BRAILLE_TABLES_OUTPUT_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/tables"
+            "${BRAILLE_TABLES_OUTPUT_DIR}"
+        COMMENT "Copying braille tables to ${BRAILLE_TABLES_OUTPUT_DIR}"
+    )
+endif()
+
 if (MUE_BUILD_BRAILLE_TESTS)
     add_subdirectory(tests)
 endif()
