@@ -25,29 +25,10 @@ StyledDialogView {
 
     contentHeight: contentColumn.height + root.margins * 2
 
-    property bool _focusSearchField: false
-
     function runSelection() {
         if (paletteModel.runSelected()) {
             root.accept()
         }
-    }
-
-    function focusResult(index) {
-        if (index < 0) {
-            searchField.navigation.requestActive()
-            return
-        }
-
-        _focusSearchField = false
-        resultsList.currentIndex = index
-        Qt.callLater(function() {
-            if (_focusSearchField) return
-            var item = resultsList.itemAtIndex(index)
-            if (Boolean(item)) {
-                item.navigation.requestActive()
-            }
-        })
     }
 
     onOpened: {
@@ -94,14 +75,18 @@ StyledDialogView {
                 root.reject()
             }
 
+            Keys.onShortcutOverride: function(event) {
+                if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+                    event.accepted = true
+                }
+            }
+
             Keys.onPressed: function(event) {
                 if (event.key === Qt.Key_Down) {
                     paletteModel.moveSelection(1)
-                    root.focusResult(paletteModel.selectedIndex)
                     event.accepted = true
                 } else if (event.key === Qt.Key_Up) {
                     paletteModel.moveSelection(-1)
-                    root.focusResult(paletteModel.selectedIndex)
                     event.accepted = true
                 }
             }
@@ -147,42 +132,6 @@ StyledDialogView {
                                             .arg(index + 1)
                                             .arg(paletteModel.resultCount)
 
-                Keys.onShortcutOverride: function(event) {
-                    switch (event.key) {
-                    case Qt.Key_Backspace:
-                    case Qt.Key_Delete:
-                        event.accepted = true
-                        resultItem.removeSelectionRequested()
-                        break
-                    default:
-                        if (event.text.length > 0
-                            && !(event.modifiers & ~(Qt.ShiftModifier))
-                            && event.key !== Qt.Key_Enter
-                            && event.key !== Qt.Key_Return
-                            && event.key !== Qt.Key_Escape) {
-                            event.accepted = true
-                        }
-                        break
-                    }
-                }
-
-                Keys.onPressed: function(event) {
-                    if (event.text.length > 0
-                        && !(event.modifiers & ~(Qt.ShiftModifier))
-                        && event.key !== Qt.Key_Enter
-                        && event.key !== Qt.Key_Return
-                        && event.key !== Qt.Key_Backspace
-                        && event.key !== Qt.Key_Delete
-                        && event.key !== Qt.Key_Escape) {
-                        root._focusSearchField = true
-                        searchField.inputField.text += event.text
-                        searchField.navigation.requestActive()
-                        searchField.inputField.cursorPosition = searchField.inputField.text.length
-                        searchField.inputField.deselect()
-                        event.accepted = true
-                    }
-                }
-
                 navigation.onActiveChanged: {
                     if (navigation.active) {
                         resultsList.positionViewAtIndex(index, ListView.Contain)
@@ -202,6 +151,15 @@ StyledDialogView {
                     verticalAlignment: Text.AlignVCenter
                     text: model.title
                     color: resultItem.isSelected ? ui.theme.accentColor : ui.theme.fontPrimaryColor
+                }
+            }
+        }
+
+        Connections {
+            target: paletteModel
+            function onSelectedIndexChanged() {
+                if (paletteModel.selectedIndex >= 0) {
+                    resultsList.positionViewAtIndex(paletteModel.selectedIndex, ListView.Contain)
                 }
             }
         }
