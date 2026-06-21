@@ -1,5 +1,85 @@
 # Accessibility Tracker Implementation Plan
 
+## Go-To Position Dialog: Value Capture Fix
+
+### Problem
+
+The `GoToPositionDialog` always returns `1` regardless of what the user types. This makes it seem like:
+- **Command palette doesn't work** — the action dispatches, the dialog opens, but entering any value navigates to position 1 (often where the cursor already is, so nothing visible happens)
+- **Hotkeys open dialog but value is ignored** — same root cause
+
+### Root Cause
+
+In `GoToPositionDialog.qml` (line 98), `currentValue: 1` is hardcoded with no `onValueEdited` handler. The `IncrementalPropertyControl` emits `valueEdited` on every keystroke (via its internal `onTextEdited` handler at `IncrementalPropertyControl.qml:256-268`), but the dialog never captures it. So `currentValue` stays at `1` forever.
+
+The existing `TempoDialog.qml` and `SelectMeasuresCountDialog.qml` both handle this correctly with a separate tracking property + `onValueEdited` handler:
+
+```qml
+// TempoDialog pattern (correct):
+property int tempoBpm: 120
+IncrementalPropertyControl {
+    currentValue: root.tempoBpm
+    onValueEdited: function(newValue) { root.tempoBpm = newValue }
+    onAccepted: { root.ret = { errcode: 0, value: root.tempoBpm }; root.hide() }
+}
+```
+
+### Fix
+
+**File:** `src/notationscene/qml/MuseScore/NotationScene/GoToPositionDialog.qml`
+
+Follow the `TempoDialog` pattern exactly:
+
+1. **Add tracking property** (after `property string dimension: "beat"`, line 31):
+   ```qml
+   property int positionValue: 1
+   ```
+
+2. **Bind `currentValue` to tracking property** (line 98):
+   - Change `currentValue: 1` → `currentValue: root.positionValue`
+
+3. **Add `onValueEdited` handler** (after `maxValue: 999`, line 102):
+   ```qml
+   onValueEdited: function(newValue) {
+       root.positionValue = newValue
+   }
+   ```
+   This fires on every keystroke (via `IncrementalPropertyControl`'s internal `onTextEdited` → `valueEdited` chain) and also on +/- button clicks.
+
+4. **Return tracking property in `onAccepted`** (line 105):
+   - Change `root.ret = { errcode: 0, value: currentValue }` → `root.ret = { errcode: 0, value: root.positionValue }`
+
+5. **Return tracking property in OK button** (line 131):
+   - Change `root.ret = { errcode: 0, value: inputField.currentValue }` → `root.ret = { errcode: 0, value: root.positionValue }`
+
+### Why This Works
+
+The `IncrementalPropertyControl` has an internal `onTextEdited` handler (line 256-268 of `IncrementalPropertyControl.qml`) that:
+1. Fires on every keystroke in the text field
+2. Parses the text to a number
+3. Emits `valueEdited(newValue)`
+
+When the dialog handles `onValueEdited`, it updates `root.positionValue` on every keystroke. By the time the user presses Enter or clicks OK, `root.positionValue` already holds the typed value.
+
+The binding `currentValue: root.positionValue` ensures the display stays in sync (e.g., if +/- buttons are used, the text field updates).
+
+### Verification
+
+1. `.\dev.ps1 build -j 8` — build succeeds
+2. `.\dev.ps1 run` — launch app
+3. Open a score with multiple measures
+4. Press `Ctrl+Alt+M` — dialog opens
+5. Type `5`, press Enter — cursor should jump to measure 5
+6. Press `Ctrl+Alt+S` — dialog opens
+7. Type `2`, click OK — cursor should jump to staff 2
+8. Open command palette (`Ctrl+K`), type "go to beat", select it
+9. Type `3`, press Enter — cursor should jump to beat 3
+10. Test clamping: type `9999`, press Enter — cursor should jump to last measure
+
+---
+
+## Previous: Accessibility Tracker Implementation Plan
+
 ## Goal
 
 Address the remaining GitHub tracker issues on `tbui17/MuseScore` without turning screen-reader output into noisy, constant narration.
@@ -491,90 +571,75 @@ endif()
 
 ---
 
-## Fix 2: Command Palette Typing Focus
+## Fix 2 + 3 (REVISED): Keep Focus on Search Field
 
-**Problem:** When a result item has focus, `ListItemBlank` has no `Keys.onPressed` for letter keys. Keystrokes propagate up through `StyledListView` → `Column` → `StyledDialogView` and get lost.
+**Root cause:** The original pattern transfers focus to delegates via `navigation.requestActive()`. This creates a focus round-trip (search → delegate → search) that breaks typing. The `nav-down`/`nav-up` shortcuts also steal arrow keys from the search field because `valueInput.Keys.onShortcutOverride` (`TextInputField.qml:208`) doesn't accept Up/Down.
+
+**New pattern:** Focus stays on the search field at all times. Arrow keys move the selection highlight (model state, not focus). Typing naturally goes to the search field. No existing component implements this — `StyledMenu` uses the same `requestActive()` pattern.
 
 **File:** `src/appshell/qml/MuseScore/AppShell/CommandPaletteDialog.qml`
 
-**Change:** Add `Keys.onPressed` to the `ListItemBlank` delegate (after line 144, after `navigation.accessible.name`):
+### Changes:
 
+1. **Add `Keys.onShortcutOverride` on `searchField`** — accepts Up/Down to prevent `nav-down`/`nav-up` shortcuts from stealing them. This fires AFTER `valueInput`'s handler (which returns without accepting for Up/Down), then propagates to the `searchField` FocusScope:
 ```qml
-Keys.onPressed: function(event) {
-    if (event.text.length > 0
-        && !(event.modifiers & ~(Qt.ShiftModifier))
-        && event.key !== Qt.Key_Enter
-        && event.key !== Qt.Key_Return
-        && event.key !== Qt.Key_Backspace
-        && event.key !== Qt.Key_Delete
-        && event.key !== Qt.Key_Escape) {
-        searchField.inputField.text += event.text
-        searchField.navigation.requestActive()
-        searchField.inputField.cursorPosition = searchField.inputField.text.length
-        searchField.inputField.deselect()
+Keys.onShortcutOverride: function(event) {
+    if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
         event.accepted = true
     }
 }
 ```
 
-- `inputField` is a readonly alias to `valueInput` (`TextInputField.qml:52`)
-- Setting `.text +=` triggers `onTextChanged` → `SearchField.onTextChanged` → `searchText` update → `paletteModel.searchText` update → results refresh
-- `requestActive()` → `forceActiveFocus()` → `valueInput.onActiveFocusChanged` → `selectAll()` — the `cursorPosition` + `deselect()` undoes this
-- `!(event.modifiers & ~(Qt.ShiftModifier))` allows Shift (uppercase) but blocks Ctrl/Alt/Meta
-
-**Verify:** Open command palette, arrow down to a result, type a letter — search field should focus and show the letter, results should filter.
-
----
-
-## Fix 3: Command Palette Scroll
-
-**Problem:** `focusResult()` calls `positionViewAtIndex` BEFORE the delegate becomes active — inverted from the working pattern used by `StyledMenu.qml:503-507`, `StyledDropdownView.qml:246-251`, and `DirectoriesView.qml:140-145`. Those all call `positionViewAtIndex` from `navigation.onActiveChanged` AFTER the delegate is active. `StyledListView` has no built-in auto-scroll.
-
-**File:** `src/appshell/qml/MuseScore/AppShell/CommandPaletteDialog.qml`
-
-**Changes:**
-
-1. Add `navigation.onActiveChanged` to the delegate (after line 144, alongside Fix 2):
+2. **Simplify `searchField.Keys.onPressed`** — just call `moveSelection`, no `focusResult`:
 ```qml
-navigation.onActiveChanged: {
-    if (navigation.active) {
-        resultsList.positionViewAtIndex(index, ListView.Contain)
+Keys.onPressed: function(event) {
+    if (event.key === Qt.Key_Down) {
+        paletteModel.moveSelection(1)
+        event.accepted = true
+    } else if (event.key === Qt.Key_Up) {
+        paletteModel.moveSelection(-1)
+        event.accepted = true
     }
 }
 ```
 
-2. Add `currentIndex` binding on `StyledListView` (after line 126):
-```qml
-currentIndex: paletteModel.selectedIndex
-```
+3. **Remove `focusResult` function** entirely (lines 34-48) — no longer needed.
 
-3. Simplify `focusResult()` (lines 34-48) — remove `positionViewAtIndex` call (now handled by delegate's `onActiveChanged`):
-```qml
-function focusResult(index) {
-    if (index < 0) {
-        searchField.navigation.requestActive()
-        return
-    }
+4. **Remove `_focusSearchField` property** — no longer needed.
 
-    resultsList.currentIndex = index
-    Qt.callLater(function() {
-        var item = resultsList.itemAtIndex(index)
-        if (Boolean(item)) {
-            item.navigation.requestActive()
+5. **Remove delegate `Keys.onShortcutOverride` and `Keys.onPressed`** — focus never transfers to delegates, so no key handling needed there.
+
+6. **Keep `currentIndex: paletteModel.selectedIndex`** on `StyledListView` — syncs the list position.
+
+7. **Add `Connections` block** for scrolling (was removed earlier, now needed since delegates aren't activated):
+```qml
+Connections {
+    target: paletteModel
+    function onSelectedIndexChanged() {
+        if (paletteModel.selectedIndex >= 0) {
+            resultsList.positionViewAtIndex(paletteModel.selectedIndex, ListView.Contain)
         }
-    })
+    }
 }
 ```
 
-4. Remove the `Connections` block (lines 163-170) — redundant with `currentIndex` binding + `onActiveChanged`.
+8. **Keep `navigation.onActiveChanged`** on delegate — still useful for mouse-click activation.
 
-**Verify:** Open command palette, search for a common term (e.g., "note"), arrow down through results past the visible area — the list should scroll to follow the selection.
+9. **Keep `navigation.panel`/`navigation.row`** on delegates — still needed for accessibility structure, but delegates won't be activated via keyboard.
+
+### Why this works:
+- `valueInput.Keys.onShortcutOverride` returns without accepting Up/Down → event propagates to `searchField.Keys.onShortcutOverride` → accepts → shortcut system doesn't intercept → `searchField.Keys.onPressed` fires → `moveSelection` updates `selectedIndex` → `Connections` scrolls the list → `isSelected` binding updates the visual highlight
+- Typing goes directly to `valueInput` (which always has active focus) — no interception needed
+- Enter fires `searchField.onAccepted` → `runSelection()` — already works
+
+### Accessibility:
+Screen readers won't read the selected delegate on arrow navigation (since it's not activated). Can be addressed later by updating `searchField.accessible.name` to include the selected item info, or via `announce()`.
+
+**Verify:** Open command palette → type "note" → arrow down through results → type another letter → should filter immediately with no focus loss. Scroll should follow selection.
 
 ---
 
 ## Commit Strategy
 
-Three separate commits:
-- `fix(build): copy braille tables for debug builds`
-- `fix(commandpalette): focus search on typing from results`
-- `fix(commandpalette): scroll to follow selection`
+- `fix(build): copy braille tables for debug builds` (already committed)
+- `fix(commandpalette): keep focus on search field during navigation` (replaces previous typing + scroll commits)
