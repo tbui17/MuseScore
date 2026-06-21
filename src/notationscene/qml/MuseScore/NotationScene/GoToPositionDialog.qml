@@ -64,18 +64,18 @@ StyledDialogView {
         anchors.fill: parent
         spacing: 20
 
-        NavigationPanel {
-            id: navPanel
-            name: "GoToPositionNavigationPanel"
-            enabled: content && content.enabled && content.visible
-            section: root.navigationSection
-            order: 1
-            direction: NavigationPanel.Horizontal
-        }
-
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
+
+            NavigationPanel {
+                id: navPanel
+                name: "GoToPositionNavigationPanel"
+                enabled: content && content.enabled && content.visible
+                section: root.navigationSection
+                order: 1
+                direction: NavigationPanel.Horizontal
+            }
 
             StyledTextLabel {
                 id: inputLabel
