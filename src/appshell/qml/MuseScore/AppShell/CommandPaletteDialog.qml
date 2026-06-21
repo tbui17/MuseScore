@@ -25,6 +25,8 @@ StyledDialogView {
 
     contentHeight: contentColumn.height + root.margins * 2
 
+    property bool _focusSearchField: false
+
     function runSelection() {
         if (paletteModel.runSelected()) {
             root.accept()
@@ -37,8 +39,10 @@ StyledDialogView {
             return
         }
 
+        _focusSearchField = false
         resultsList.currentIndex = index
         Qt.callLater(function() {
+            if (_focusSearchField) return
             var item = resultsList.itemAtIndex(index)
             if (Boolean(item)) {
                 item.navigation.requestActive()
@@ -170,6 +174,7 @@ StyledDialogView {
                         && event.key !== Qt.Key_Backspace
                         && event.key !== Qt.Key_Delete
                         && event.key !== Qt.Key_Escape) {
+                        root._focusSearchField = true
                         searchField.inputField.text += event.text
                         searchField.navigation.requestActive()
                         searchField.inputField.cursorPosition = searchField.inputField.text.length
