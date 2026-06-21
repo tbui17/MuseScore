@@ -43,6 +43,7 @@
 #include <set>
 
 #include <QGuiApplication>
+#include <QTimer>
 
 using namespace mu;
 using namespace muse;
@@ -1701,21 +1702,23 @@ void NotationActionController::openGoToDialog(const QString& dimension)
         uri = "musescore://notation/gotobeat";
     }
 
-    UriQuery query(uri);
-    query.addParam("dimension", Val(dimension.toStdString()));
+    QTimer::singleShot(0, [this, uri, dimension]() {
+        UriQuery query(uri);
+        query.addParam("dimension", Val(dimension.toStdString()));
 
-    interactive()->open(query)
-    .onResolve(this, [this, dimension](const Val& v) {
-        int value = v.toInt();
-        if (dimension == "measure") {
-            goToMeasure(value);
-        } else if (dimension == "staff") {
-            goToStaff(value);
-        } else if (dimension == "voice") {
-            goToVoice(value);
-        } else {
-            goToBeat(value);
-        }
+        interactive()->open(query)
+        .onResolve(this, [this, dimension](const Val& v) {
+            int value = v.toInt();
+            if (dimension == "measure") {
+                goToMeasure(value);
+            } else if (dimension == "staff") {
+                goToStaff(value);
+            } else if (dimension == "voice") {
+                goToVoice(value);
+            } else {
+                goToBeat(value);
+            }
+        });
     });
 }
 
