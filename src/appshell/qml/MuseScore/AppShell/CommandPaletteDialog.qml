@@ -143,6 +143,25 @@ StyledDialogView {
                                             .arg(index + 1)
                                             .arg(paletteModel.resultCount)
 
+                Keys.onShortcutOverride: function(event) {
+                    switch (event.key) {
+                    case Qt.Key_Backspace:
+                    case Qt.Key_Delete:
+                        event.accepted = true
+                        resultItem.removeSelectionRequested()
+                        break
+                    default:
+                        if (event.text.length > 0
+                            && !(event.modifiers & ~(Qt.ShiftModifier))
+                            && event.key !== Qt.Key_Enter
+                            && event.key !== Qt.Key_Return
+                            && event.key !== Qt.Key_Escape) {
+                            event.accepted = true
+                        }
+                        break
+                    }
+                }
+
                 Keys.onPressed: function(event) {
                     if (event.text.length > 0
                         && !(event.modifiers & ~(Qt.ShiftModifier))
