@@ -257,11 +257,15 @@ function Invoke-Ninja {
 
 function Invoke-Package {
     param(
-        [string[]] $PackageArgs
+        [string[]] $PackageArgs = @()
     )
 
     $buildScript = Join-Path $RepoRoot "tools\braille-installer\Build-MuseScore-Braille-Package.ps1"
-    & $buildScript @PackageArgs
+    if ($PackageArgs.Count -gt 0) {
+        & $buildScript @PackageArgs
+    } else {
+        & $buildScript
+    }
     if ((Test-Path Variable:\LASTEXITCODE) -and ($LASTEXITCODE -ne 0)) { exit $LASTEXITCODE }
 }
 
