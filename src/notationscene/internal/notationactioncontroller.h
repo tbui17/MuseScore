@@ -132,6 +132,12 @@ private:
     void announcePosition();
     void announceCurrentTempo();
     void openSetTempoDialog();
+    void openGoToDialog(const QString& dimension);
+    void goToMeasure(int measureNum);
+    void goToStaff(int staffNum);
+    void goToVoice(int voiceNum);
+    void goToBeat(int beatNum);
+    void selectAndAnnouncePosition(const Fraction& tick, staff_idx_t staffIdx, voice_idx_t voiceIdx);
     mu::engraving::EngravingItem* tempoTargetItem() const;
     bool currentTempoTick(Fraction& tick) const;
     void addImage();

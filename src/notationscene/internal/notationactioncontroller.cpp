@@ -38,6 +38,7 @@
 #include "translation.h"
 #include "log.h"
 
+#include <algorithm>
 #include <cmath>
 #include <set>
 
@@ -410,6 +411,10 @@ void NotationActionController::init()
     registerAction("announce-position", [this]() { announcePosition(); });
     registerAction("current-tempo", [this]() { announceCurrentTempo(); });
     registerAction("set-tempo", [this]() { openSetTempoDialog(); });
+    registerAction("goto-measure", [this]() { openGoToDialog("measure"); });
+    registerAction("goto-staff", [this]() { openGoToDialog("staff"); });
+    registerAction("goto-voice", [this]() { openGoToDialog("voice"); });
+    registerAction("goto-beat", [this]() { openGoToDialog("beat"); });
 
     registerAction("figured-bass", [this]() { addFiguredBass(); });
 
@@ -1675,6 +1680,199 @@ void NotationActionController::openSetTempoDialog()
             accessibilityController()->announce(muse::qtrc("notation", "Select a note or rest to set tempo"));
         }
     });
+}
+
+void NotationActionController::openGoToDialog(const QString& dimension)
+{
+    mu::engraving::Score* score = currentNotationScore();
+    auto interaction = currentNotationInteraction();
+    if (!score || !interaction) {
+        return;
+    }
+
+    std::string uri;
+    if (dimension == "measure") {
+        uri = "musescore://notation/gotomeasure";
+    } else if (dimension == "staff") {
+        uri = "musescore://notation/gotostaff";
+    } else if (dimension == "voice") {
+        uri = "musescore://notation/gotovoice";
+    } else {
+        uri = "musescore://notation/gotobeat";
+    }
+
+    interactive()->open(uri)
+    .onResolve(this, [this, dimension](const Val& v) {
+        int value = v.toInt();
+        if (dimension == "measure") {
+            goToMeasure(value);
+        } else if (dimension == "staff") {
+            goToStaff(value);
+        } else if (dimension == "voice") {
+            goToVoice(value);
+        } else {
+            goToBeat(value);
+        }
+    });
+}
+
+void NotationActionController::selectAndAnnouncePosition(
+    const Fraction& tick, staff_idx_t staffIdx, voice_idx_t voiceIdx)
+{
+    mu::engraving::Score* score = currentNotationScore();
+    auto interaction = currentNotationInteraction();
+    if (!score || !interaction) {
+        return;
+    }
+
+    track_idx_t track = mu::engraving::staff2track(staffIdx, voiceIdx);
+    auto seg = score->tick2segment(tick);
+    if (!seg) {
+        seg = score->tick2leftSegment(tick);
+    }
+    if (!seg) {
+        accessibilityController()->announce(muse::qtrc("notation", "No element at that position"));
+        return;
+    }
+
+    EngravingItem* el = seg->element(track);
+    if (!el) {
+        el = seg->firstElementForNavigation(staffIdx);
+    }
+    if (!el) {
+        interaction->findAndSelectChordRest(tick);
+        announcePosition();
+        return;
+    }
+
+    interaction->select({ el }, SelectType::SINGLE, staffIdx);
+    interaction->showItem(el);
+
+    announcePosition();
+}
+
+void NotationActionController::goToMeasure(int measureNum)
+{
+    mu::engraving::Score* score = currentNotationScore();
+    auto interaction = currentNotationInteraction();
+    if (!score || !interaction) {
+        return;
+    }
+
+    measureNum = std::clamp(measureNum, 1, static_cast<int>(score->nmeasures()));
+    int measureIdx = measureNum - 1;
+
+    mu::engraving::Measure* measure = score->crMeasure(measureIdx);
+    if (!measure) {
+        return;
+    }
+
+    Fraction tick = measure->tick();
+
+    staff_idx_t staffIdx = muse::nidx;
+    voice_idx_t voiceIdx = 0;
+
+    EngravingItem* refItem = interaction->contextItem();
+    if (refItem) {
+        staffIdx = refItem->staffIdx();
+        voiceIdx = refItem->voice();
+    }
+
+    if (staffIdx == muse::nidx) {
+        staffIdx = 0;
+    }
+
+    selectAndAnnouncePosition(tick, staffIdx, voiceIdx);
+}
+
+void NotationActionController::goToStaff(int staffNum)
+{
+    mu::engraving::Score* score = currentNotationScore();
+    auto interaction = currentNotationInteraction();
+    if (!score || !interaction) {
+        return;
+    }
+
+    staffNum = std::clamp(staffNum, 1, static_cast<int>(score->nstaves()));
+    staff_idx_t staffIdx = static_cast<staff_idx_t>(staffNum - 1);
+
+    Fraction tick;
+    voice_idx_t voiceIdx = 0;
+
+    EngravingItem* refItem = interaction->contextItem();
+    if (refItem) {
+        tick = refItem->tick();
+        voiceIdx = refItem->voice();
+    } else {
+        tick = score->pos();
+    }
+
+    selectAndAnnouncePosition(tick, staffIdx, voiceIdx);
+}
+
+void NotationActionController::goToVoice(int voiceNum)
+{
+    mu::engraving::Score* score = currentNotationScore();
+    auto interaction = currentNotationInteraction();
+    if (!score || !interaction) {
+        return;
+    }
+
+    voiceNum = std::clamp(voiceNum, 1, static_cast<int>(mu::engraving::VOICES));
+    voice_idx_t voiceIdx = static_cast<voice_idx_t>(voiceNum - 1);
+
+    Fraction tick;
+    staff_idx_t staffIdx = 0;
+
+    EngravingItem* refItem = interaction->contextItem();
+    if (refItem) {
+        tick = refItem->tick();
+        staffIdx = refItem->staffIdx();
+    } else {
+        tick = score->pos();
+    }
+
+    selectAndAnnouncePosition(tick, staffIdx, voiceIdx);
+}
+
+void NotationActionController::goToBeat(int beatNum)
+{
+    mu::engraving::Score* score = currentNotationScore();
+    auto interaction = currentNotationInteraction();
+    if (!score || !interaction) {
+        return;
+    }
+
+    Fraction tick;
+    staff_idx_t staffIdx = muse::nidx;
+    voice_idx_t voiceIdx = 0;
+
+    EngravingItem* refItem = interaction->contextItem();
+    if (refItem) {
+        tick = refItem->tick();
+        staffIdx = refItem->staffIdx();
+        voiceIdx = refItem->voice();
+    } else {
+        tick = score->pos();
+    }
+
+    if (staffIdx == muse::nidx) {
+        staffIdx = 0;
+    }
+
+    mu::engraving::Measure* measure = score->tick2measure(tick);
+    if (!measure) {
+        return;
+    }
+
+    int ticksPerBeat = mu::engraving::ticks_beat(
+        score->sigmap()->timesig(tick.ticks()).timesig().denominator());
+    int beatsInMeasure = measure->ticks().ticks() / ticksPerBeat;
+    beatNum = std::clamp(beatNum, 1, std::max(1, beatsInMeasure));
+
+    Fraction targetTick = measure->tick() + Fraction::fromTicks((beatNum - 1) * ticksPerBeat);
+
+    selectAndAnnouncePosition(targetTick, staffIdx, voiceIdx);
 }
 
 EngravingItem* NotationActionController::tempoTargetItem() const
