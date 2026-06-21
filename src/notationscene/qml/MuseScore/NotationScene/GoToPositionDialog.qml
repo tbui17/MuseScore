@@ -29,6 +29,7 @@ StyledDialogView {
     id: root
 
     property string dimension: "beat"
+    property int positionValue: 1
 
     readonly property string dimensionLabel: {
         switch (dimension) {
@@ -95,14 +96,18 @@ StyledDialogView {
                 navigation.order: 0
                 navigation.accessible.name: inputLabel.text + " " + currentValue
 
-                currentValue: 1
+                currentValue: root.positionValue
                 step: 1
                 decimals: 0
                 minValue: 1
                 maxValue: 999
 
+                onValueEdited: function(newValue) {
+                    root.positionValue = newValue
+                }
+
                 onAccepted: {
-                    root.ret = { errcode: 0, value: currentValue }
+                    root.ret = { errcode: 0, value: root.positionValue }
                     root.hide()
                 }
 
@@ -128,7 +133,7 @@ StyledDialogView {
                 accentButton: true
 
                 onClicked: {
-                    root.ret = { errcode: 0, value: inputField.currentValue }
+                    root.ret = { errcode: 0, value: root.positionValue }
                     root.hide()
                 }
             }
