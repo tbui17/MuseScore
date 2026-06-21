@@ -133,7 +133,7 @@ function Invoke-Build {
     }
 
     & $ninjaBuild @invokeArgs
-    if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
+    if (Test-Path Variable:\LASTEXITCODE -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 function Invoke-Run {
@@ -252,7 +252,7 @@ function Invoke-Ninja {
 
     $ninjaBuild = Join-Path $RepoRoot "ninja_build.bat"
     & $ninjaBuild "-t" $Target @BuildArgs
-    if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
+    if (Test-Path Variable:\LASTEXITCODE -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 function Invoke-Package {
@@ -262,7 +262,7 @@ function Invoke-Package {
 
     $buildScript = Join-Path $RepoRoot "tools\braille-installer\Build-MuseScore-Braille-Package.ps1"
     & $buildScript @PackageArgs
-    if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
+    if (Test-Path Variable:\LASTEXITCODE -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 function Invoke-Publish {
