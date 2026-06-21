@@ -1441,6 +1441,30 @@ const UiActionList NotationUiActions::s_actions = {
              TranslatableString("action", "Set tempo"),
              TranslatableString("action", "Set tempo at cursor position")
              ),
+    UiAction("goto-measure",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Go to measure"),
+             TranslatableString("action", "Open dialog to jump to a specific measure")
+             ),
+    UiAction("goto-staff",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Go to staff"),
+             TranslatableString("action", "Open dialog to jump to a specific staff")
+             ),
+    UiAction("goto-voice",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Go to voice"),
+             TranslatableString("action", "Open dialog to jump to a specific voice")
+             ),
+    UiAction("goto-beat",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Go to beat"),
+             TranslatableString("action", "Open dialog to jump to a specific beat")
+             ),
     UiAction("duplet",
              mu::context::UiCtxProjectOpened,
              mu::context::CTX_NOTATION_FOCUSED,
