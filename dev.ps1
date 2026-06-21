@@ -24,6 +24,18 @@ Daily commands:
   test <script> [args...]
       Run a MuseScore app test-case script through the Debug executable.
 
+  release [args...]
+      Release build to build.release/.
+
+  install [args...]
+      Release build + install to build.install/.
+
+  package [args...]
+      Package build.install/ into a distributable ZIP at dist/.
+
+  publish [--dry-run]
+      Build release, install, package, and push to GitHub Releases.
+
   clean [debug|release|install] [--yes]
       Preview deletion of build directories. Add --yes to delete.
 
@@ -232,6 +244,69 @@ function Invoke-Clean {
     }
 }
 
+function Invoke-Ninja {
+    param(
+        [string] $Target,
+        [string[]] $BuildArgs
+    )
+
+    $ninjaBuild = Join-Path $RepoRoot "ninja_build.bat"
+    & $ninjaBuild "-t" $Target @BuildArgs
+    if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
+}
+
+function Invoke-Package {
+    param(
+        [string[]] $PackageArgs
+    )
+
+    $buildScript = Join-Path $RepoRoot "tools\braille-installer\Build-MuseScore-Braille-Package.ps1"
+    & $buildScript @PackageArgs
+    if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
+}
+
+function Invoke-Publish {
+    param(
+        [string[]] $PublishArgs
+    )
+
+    $dryRun = $PublishArgs -contains "--dry-run"
+    if ($dryRun) {
+        $PublishArgs = $PublishArgs | Where-Object { $_ -ne "--dry-run" }
+    }
+
+    # Step 1: Build + install
+    Write-Host "Step 1: Building release and installing to build.install/"
+    Invoke-Ninja -Target "install" -BuildArgs $PublishArgs
+
+    # Step 2: Package into ZIP
+    Write-Host "Step 2: Packaging build.install/ into ZIP"
+    Invoke-Package
+
+    # Step 3: Create GitHub release
+    $date = Get-Date -Format "yyyy-MM-dd"
+    $tag = "braille-test-$date"
+    $zipPattern = Join-Path $RepoRoot "dist\musescore-braille-installer\MuseScore-Braille-Installer-*.zip"
+    $zipFile = Get-ChildItem -LiteralPath $zipPattern | Select-Object -First 1
+
+    if (-not $zipFile) {
+        throw "No ZIP found matching $zipPattern"
+    }
+
+    Write-Host "Step 3: Creating GitHub release $tag"
+    if ($dryRun) {
+        Write-Host "  [DRY RUN] Would run:"
+        Write-Host "  gh release create $tag `"$($zipFile.FullName)`" --repo tbui17/MuseScore --title `"MuseScore Braille Test Build $date`""
+    }
+    else {
+        gh release create $tag $zipFile.FullName --repo tbui17/MuseScore --title "MuseScore Braille Test Build $date"
+        if ($LASTEXITCODE -ne 0) {
+            throw "gh release create failed with exit code $LASTEXITCODE"
+        }
+        Write-Host "Done: https://github.com/tbui17/MuseScore/releases/tag/$tag"
+    }
+}
+
 function Invoke-Lint {
     param(
         [string[]] $LintArgs
@@ -279,6 +354,10 @@ try {
         "test" { Invoke-Test -TestArgs $commandArgs }
         "clean" { Invoke-Clean -CleanArgs $commandArgs }
         "lint" { Invoke-Lint -LintArgs $commandArgs }
+        "release" { Invoke-Ninja -Target "release" -BuildArgs $commandArgs }
+        "install" { Invoke-Ninja -Target "install" -BuildArgs $commandArgs }
+        "package" { Invoke-Package -PackageArgs $commandArgs }
+        "publish" { Invoke-Publish -PublishArgs $commandArgs }
         "help" { Show-Usage }
         "-h" { Show-Usage }
         "--help" { Show-Usage }
