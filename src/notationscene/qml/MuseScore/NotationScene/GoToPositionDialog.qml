@@ -28,13 +28,7 @@ import Muse.UiComponents
 StyledDialogView {
     id: root
 
-    readonly property string dimension: {
-        var name = root.objectName || ""
-        if (name.indexOf("measure") >= 0) return "measure"
-        if (name.indexOf("staff") >= 0) return "staff"
-        if (name.indexOf("voice") >= 0) return "voice"
-        return "beat"
-    }
+    property string dimension: "beat"
 
     readonly property string dimensionLabel: {
         switch (dimension) {
