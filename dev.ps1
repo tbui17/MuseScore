@@ -121,7 +121,7 @@ function Invoke-Build {
     }
 
     & $ninjaBuild @invokeArgs
-    exit $LASTEXITCODE
+    if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
 }
 
 function Invoke-Run {
@@ -133,7 +133,7 @@ function Invoke-Run {
     Push-Location $RepoRoot
     try {
         & $exePath @RunArgs
-        exit $LASTEXITCODE
+        if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
     }
     finally {
         Pop-Location
@@ -161,7 +161,7 @@ function Invoke-Test {
     Push-Location $RepoRoot
     try {
         & $exePath @invokeArgs
-        exit $LASTEXITCODE
+        if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
     }
     finally {
         Pop-Location
