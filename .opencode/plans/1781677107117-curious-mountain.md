@@ -454,3 +454,127 @@ Use small commits by issue/slice:
 - `fix(playback): decouple playback from braille panel visibility`
 - `feat(playback): add play current measure action`
 - `feat(accessibility): add current item detail announcements`
+
+---
+
+# Plan: Three Bug Fixes (Braille Tables, Cmd Palette Typing, Cmd Palette Scroll)
+
+## Fix 1: Braille Tables CMake Post-Build Copy
+
+**Problem:** `appDataPath()` resolves to `applicationDirPath() + "/../"` = repo root for debug builds (`globalconfiguration.cpp:68-72`). Braille tables (424 files across two source dirs) are only copied via `install()` rules which don't run during Ninja builds. Other resources (styles, templates) work because they're already at the repo root in `share/`.
+
+**File:** `src/braille/CMakeLists.txt` (after line 35, after `target_link_libraries`)
+
+**Change:** Add a `POST_BUILD` custom command on the `braille` target:
+```cmake
+if (OS_IS_WIN AND NOT CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(BRAILLE_TABLES_OUTPUT_DIR "${CMAKE_BINARY_DIR}/../tables")
+    add_custom_command(TARGET braille POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${BRAILLE_TABLES_OUTPUT_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/liblouis/tables"
+            "${BRAILLE_TABLES_OUTPUT_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/tables"
+            "${BRAILLE_TABLES_OUTPUT_DIR}"
+        COMMENT "Copying braille tables to ${BRAILLE_TABLES_OUTPUT_DIR}"
+    )
+endif()
+```
+
+- `copy_directory` merges into the target (doesn't replace), so calling it twice for the two source dirs works
+- Skips unchanged files on subsequent builds (fast incremental)
+- `NOT Visual Studio` guard avoids duplicating the existing VS post-build cmake_install mechanism
+- After this works, delete the manual `tables/` workaround at repo root (it's gitignored anyway)
+
+**Verify:** `.\dev.ps1 build` then check `build.debug\..\tables\` has 424+ files. Run MuseScore and open braille panel — no crash.
+
+---
+
+## Fix 2: Command Palette Typing Focus
+
+**Problem:** When a result item has focus, `ListItemBlank` has no `Keys.onPressed` for letter keys. Keystrokes propagate up through `StyledListView` → `Column` → `StyledDialogView` and get lost.
+
+**File:** `src/appshell/qml/MuseScore/AppShell/CommandPaletteDialog.qml`
+
+**Change:** Add `Keys.onPressed` to the `ListItemBlank` delegate (after line 144, after `navigation.accessible.name`):
+
+```qml
+Keys.onPressed: function(event) {
+    if (event.text.length > 0
+        && !(event.modifiers & ~(Qt.ShiftModifier))
+        && event.key !== Qt.Key_Enter
+        && event.key !== Qt.Key_Return
+        && event.key !== Qt.Key_Backspace
+        && event.key !== Qt.Key_Delete
+        && event.key !== Qt.Key_Escape) {
+        searchField.inputField.text += event.text
+        searchField.navigation.requestActive()
+        searchField.inputField.cursorPosition = searchField.inputField.text.length
+        searchField.inputField.deselect()
+        event.accepted = true
+    }
+}
+```
+
+- `inputField` is a readonly alias to `valueInput` (`TextInputField.qml:52`)
+- Setting `.text +=` triggers `onTextChanged` → `SearchField.onTextChanged` → `searchText` update → `paletteModel.searchText` update → results refresh
+- `requestActive()` → `forceActiveFocus()` → `valueInput.onActiveFocusChanged` → `selectAll()` — the `cursorPosition` + `deselect()` undoes this
+- `!(event.modifiers & ~(Qt.ShiftModifier))` allows Shift (uppercase) but blocks Ctrl/Alt/Meta
+
+**Verify:** Open command palette, arrow down to a result, type a letter — search field should focus and show the letter, results should filter.
+
+---
+
+## Fix 3: Command Palette Scroll
+
+**Problem:** `focusResult()` calls `positionViewAtIndex` BEFORE the delegate becomes active — inverted from the working pattern used by `StyledMenu.qml:503-507`, `StyledDropdownView.qml:246-251`, and `DirectoriesView.qml:140-145`. Those all call `positionViewAtIndex` from `navigation.onActiveChanged` AFTER the delegate is active. `StyledListView` has no built-in auto-scroll.
+
+**File:** `src/appshell/qml/MuseScore/AppShell/CommandPaletteDialog.qml`
+
+**Changes:**
+
+1. Add `navigation.onActiveChanged` to the delegate (after line 144, alongside Fix 2):
+```qml
+navigation.onActiveChanged: {
+    if (navigation.active) {
+        resultsList.positionViewAtIndex(index, ListView.Contain)
+    }
+}
+```
+
+2. Add `currentIndex` binding on `StyledListView` (after line 126):
+```qml
+currentIndex: paletteModel.selectedIndex
+```
+
+3. Simplify `focusResult()` (lines 34-48) — remove `positionViewAtIndex` call (now handled by delegate's `onActiveChanged`):
+```qml
+function focusResult(index) {
+    if (index < 0) {
+        searchField.navigation.requestActive()
+        return
+    }
+
+    resultsList.currentIndex = index
+    Qt.callLater(function() {
+        var item = resultsList.itemAtIndex(index)
+        if (Boolean(item)) {
+            item.navigation.requestActive()
+        }
+    })
+}
+```
+
+4. Remove the `Connections` block (lines 163-170) — redundant with `currentIndex` binding + `onActiveChanged`.
+
+**Verify:** Open command palette, search for a common term (e.g., "note"), arrow down through results past the visible area — the list should scroll to follow the selection.
+
+---
+
+## Commit Strategy
+
+Three separate commits:
+- `fix(build): copy braille tables for debug builds`
+- `fix(commandpalette): focus search on typing from results`
+- `fix(commandpalette): scroll to follow selection`
