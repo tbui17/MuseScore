@@ -14,7 +14,6 @@ using namespace muse::actions;
 using namespace muse::ui;
 
 static constexpr int MAX_RECENT_ACTIONS = 10;
-static constexpr int MAX_DISPLAY_ACTIONS = 100;
 
 CommandPaletteModel::CommandPaletteModel(QObject* parent)
     : QAbstractListModel(parent), muse::Contextable(muse::iocCtxForQmlObject(this))
@@ -196,7 +195,7 @@ QList<CommandPaletteModel::Item> CommandPaletteModel::recentItems() const
 
 QList<CommandPaletteModel::Item> CommandPaletteModel::allItems() const
 {
-    return m_availableActions.mid(0, MAX_DISPLAY_ACTIONS);
+    return m_availableActions;
 }
 
 QList<CommandPaletteModel::Item> CommandPaletteModel::matchingItems() const
