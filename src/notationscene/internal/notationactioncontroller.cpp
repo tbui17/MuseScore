@@ -1701,7 +1701,10 @@ void NotationActionController::openGoToDialog(const QString& dimension)
         uri = "musescore://notation/gotobeat";
     }
 
-    interactive()->open(uri)
+    UriQuery query(uri);
+    query.addParam("dimension", Val(dimension.toStdString()));
+
+    interactive()->open(query)
     .onResolve(this, [this, dimension](const Val& v) {
         int value = v.toInt();
         if (dimension == "measure") {
