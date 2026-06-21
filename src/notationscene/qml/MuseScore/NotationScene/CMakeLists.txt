@@ -190,6 +190,7 @@ qt_add_qml_module(notationscene_qml
         internal/SearchPopup.qml
         internal/SelectionFilterSection.qml
         internal/VoicesPopup.qml
+        GoToPositionDialog.qml
         NotationToolBar.qml
         NotationView.qml
         NoteInputBar.qml
