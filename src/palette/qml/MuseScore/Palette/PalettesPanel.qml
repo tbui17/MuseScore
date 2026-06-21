@@ -116,9 +116,6 @@ Item {
             wrapMode: Text.WordWrap
 
             visible: palettesPanelHeader.isSearchOpened && !Boolean(palettesPanelHeader.searchText)
-
-            accessible.role: MUAccessible.StaticText
-            accessible.name: text
         }
 
         StyledTextLabel {
@@ -134,9 +131,6 @@ Item {
             wrapMode: Text.WordWrap
 
             visible: !searchHint.visible && !paletteTree.isResultFound
-
-            accessible.role: MUAccessible.StaticText
-            accessible.name: text
         }
 
         PaletteTree {

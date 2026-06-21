@@ -27,6 +27,9 @@ Daily commands:
   clean [debug|release|install] [--yes]
       Preview deletion of build directories. Add --yes to delete.
 
+  lint [qml] [--accessible-only] [--filter <pattern>]
+      Run qmllint on QML files. Requires a prior build to resolve imports.
+
   help, -h, --help
       Show this help.
 "@ | Write-Host
@@ -46,6 +49,22 @@ function Show-CleanUsage {
 Usage: .\dev.ps1 clean [debug|release|install] [--yes]
 
 Without --yes, clean only previews what would be deleted.
+"@ | Write-Host
+}
+
+function Show-LintUsage {
+    @"
+Usage: .\dev.ps1 lint [qml] [options]
+
+Options:
+  --accessible-only    Show only accessible-related warnings
+  --filter <pattern>   Only lint files matching the pattern
+  --fix                 Auto-fix where possible (uses qmllint --fix)
+  --help                Show this help
+
+Requires:
+  - qmllint on PATH (ships with Qt)
+  - build.debug directory (run .\dev.ps1 build first)
 "@ | Write-Host
 }
 
@@ -213,6 +232,35 @@ function Invoke-Clean {
     }
 }
 
+function Invoke-Lint {
+    param(
+        [string[]] $LintArgs
+    )
+
+    $lintScript = Join-Path $RepoRoot "lint_qml.py"
+    if (-not (Test-Path -LiteralPath $lintScript -PathType Leaf)) {
+        Write-Error "lint_qml.py not found: $lintScript"
+        exit 1
+    }
+
+    $remainingArgs = @()
+    if ($LintArgs.Count -gt 0 -and $LintArgs[0] -eq "qml") {
+        $remainingArgs = $LintArgs[1..($LintArgs.Count - 1)]
+    }
+    else {
+        $remainingArgs = $LintArgs
+    }
+
+    foreach ($arg in $remainingArgs) {
+        if ($arg -eq "--help" -or $arg -eq "-h") {
+            Show-LintUsage
+            return
+        }
+    }
+
+    & python $lintScript @remainingArgs
+}
+
 if ($args.Count -eq 0) {
     Show-Usage
     exit 0
@@ -230,6 +278,7 @@ try {
         "run" { Invoke-Run -RunArgs $commandArgs }
         "test" { Invoke-Test -TestArgs $commandArgs }
         "clean" { Invoke-Clean -CleanArgs $commandArgs }
+        "lint" { Invoke-Lint -LintArgs $commandArgs }
         "help" { Show-Usage }
         "-h" { Show-Usage }
         "--help" { Show-Usage }

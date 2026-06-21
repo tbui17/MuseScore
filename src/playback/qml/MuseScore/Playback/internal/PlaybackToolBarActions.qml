@@ -200,10 +200,6 @@ Item {
                 implicitWidth: tempoLoader.tempoViewWidth
                 implicitHeight: root.height
 
-                navigation.panel: root.navPanel
-                navigation.order: measureAndBeatFields.navigationOrderEnd + 1
-                navigation.accessible.name: root.tempoAccessibleName
-
                 TempoView {
                     id: tempoView
                     anchors.right: parent.right

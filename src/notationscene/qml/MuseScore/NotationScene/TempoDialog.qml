@@ -29,7 +29,6 @@ StyledDialogView {
     id: root
 
     title: qsTrc("notation", "Set tempo")
-    accessible.name: title
     contentWidth: content.implicitWidth
     contentHeight: content.implicitHeight
     margins: 16
