@@ -37,8 +37,7 @@ StyledDialogView {
             return
         }
 
-        resultsList.positionViewAtIndex(index, ListView.Contain)
-
+        resultsList.currentIndex = index
         Qt.callLater(function() {
             var item = resultsList.itemAtIndex(index)
             if (Boolean(item)) {
@@ -124,6 +123,7 @@ StyledDialogView {
             height: 310
             model: paletteModel
             visible: paletteModel.resultCount > 0
+            currentIndex: paletteModel.selectedIndex
             accessible.name: qsTrc("appshell/commandpalette", "Command results")
 
             navigation.section: root.navigationSection
@@ -143,6 +143,28 @@ StyledDialogView {
                                             .arg(index + 1)
                                             .arg(paletteModel.resultCount)
 
+                Keys.onPressed: function(event) {
+                    if (event.text.length > 0
+                        && !(event.modifiers & ~(Qt.ShiftModifier))
+                        && event.key !== Qt.Key_Enter
+                        && event.key !== Qt.Key_Return
+                        && event.key !== Qt.Key_Backspace
+                        && event.key !== Qt.Key_Delete
+                        && event.key !== Qt.Key_Escape) {
+                        searchField.inputField.text += event.text
+                        searchField.navigation.requestActive()
+                        searchField.inputField.cursorPosition = searchField.inputField.text.length
+                        searchField.inputField.deselect()
+                        event.accepted = true
+                    }
+                }
+
+                navigation.onActiveChanged: {
+                    if (navigation.active) {
+                        resultsList.positionViewAtIndex(index, ListView.Contain)
+                    }
+                }
+
                 onClicked: {
                     paletteModel.selectedIndex = index
                     root.runSelection()
@@ -156,15 +178,6 @@ StyledDialogView {
                     verticalAlignment: Text.AlignVCenter
                     text: model.title
                     color: resultItem.isSelected ? ui.theme.accentColor : ui.theme.fontPrimaryColor
-                }
-            }
-        }
-
-        Connections {
-            target: paletteModel
-            function onSelectedIndexChanged() {
-                if (paletteModel.selectedIndex >= 0) {
-                    resultsList.positionViewAtIndex(paletteModel.selectedIndex, ListView.Contain)
                 }
             }
         }
