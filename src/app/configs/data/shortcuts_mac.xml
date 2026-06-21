@@ -1207,4 +1207,20 @@
     <key>grace-note-bend</key>
     <seq>Ctrl+Alt+B</seq>
     </SC>
+  <SC>
+    <key>goto-measure</key>
+    <seq>Ctrl+Alt+M</seq>
+    </SC>
+  <SC>
+    <key>goto-staff</key>
+    <seq>Ctrl+Alt+S</seq>
+    </SC>
+  <SC>
+    <key>goto-voice</key>
+    <seq>Ctrl+Alt+V</seq>
+    </SC>
+  <SC>
+    <key>goto-beat</key>
+    <seq>Ctrl+Alt+E</seq>
+    </SC>
   </Shortcuts>
