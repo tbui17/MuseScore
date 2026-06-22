@@ -1559,7 +1559,7 @@ void NotationActionController::announceCurrentTempo()
         return;
     }
 
-    int bpm = boundedTempoBpm(static_cast<int>(std::lround(score->tempo(tick).toBPM().val)));
+    int bpm = currentTempoBpm();
     accessibilityController()->announce(muse::qtrc("notation", "Current tempo: %1 BPM").arg(bpm));
 }
 
@@ -1922,6 +1922,20 @@ bool NotationActionController::currentTempoTick(Fraction& tick) const
 
     tick = item->tick();
     return true;
+}
+int NotationActionController::currentTempoBpm() const
+{
+    mu::engraving::Score* score = currentNotationScore();
+    if (!score) {
+        return MIN_TEMPO_BPM;
+    }
+
+    Fraction tick;
+    if (!currentTempoTick(tick)) {
+        return MIN_TEMPO_BPM;
+    }
+
+    return boundedTempoBpm(static_cast<int>(std::lround(score->tempo(tick).toBPM().val)));
 }
 
 void NotationActionController::addImage()

@@ -140,6 +140,7 @@ private:
     void selectAndAnnouncePosition(const Fraction& tick, staff_idx_t staffIdx, voice_idx_t voiceIdx);
     mu::engraving::EngravingItem* tempoTargetItem() const;
     bool currentTempoTick(Fraction& tick) const;
+    int currentTempoBpm() const;
     void addImage();
     void addFiguredBass();
     void addGuitarBend(GuitarBendType bendType);
