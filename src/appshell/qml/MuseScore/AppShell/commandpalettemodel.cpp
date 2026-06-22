@@ -125,7 +125,20 @@ bool CommandPaletteModel::run(int row)
 
     const ActionCode actionCode = m_items.at(row).actionCode;
     addRecentAction(actionCode);
-    dispatcher()->dispatch(actionCode);
+
+    // Defer the dispatch so the palette dialog can close first.
+    // If we dispatch synchronously, any dialog opened by the action
+    // will have the palette as its transient parent (because the palette
+    // is on top of Interactive::m_stack). When the palette then closes
+    // via root.accept(), the new dialog's visibleChanged handler
+    // (WindowView::showView, windowview.cpp:193-197) detects the
+    // transient parent becoming invisible and closes the new dialog.
+    // Deferring lets the palette leave the stack first, so the new
+    // dialog's transient parent is the main window.
+    QMetaObject::invokeMethod(this, [this, actionCode]() {
+        dispatcher()->dispatch(actionCode);
+    }, Qt::QueuedConnection);
+
     return true;
 }
 

@@ -25,11 +25,11 @@ class CommandPaletteModel : public QAbstractListModel, public muse::Contextable,
     Q_PROPERTY(QString emptyStateText READ emptyStateText NOTIFY emptyStateTextChanged)
     Q_PROPERTY(int resultCount READ resultCount NOTIFY resultCountChanged)
 
+public:
     muse::GlobalInject<IAppShellConfiguration> configuration;
     muse::ContextInject<muse::ui::IUiActionsRegister> uiActionsRegister = { this };
     muse::ContextInject<muse::actions::IActionsDispatcher> dispatcher = { this };
 
-public:
     explicit CommandPaletteModel(QObject* parent = nullptr);
 
     QVariant data(const QModelIndex& index, int role) const override;
