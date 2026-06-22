@@ -1559,7 +1559,7 @@ void NotationActionController::announceCurrentTempo()
         return;
     }
 
-    int bpm = boundedTempoBpm(static_cast<int>(std::lround(score->tempo(tick).toBPM().val)));
+    int bpm = currentTempoBpm();
     accessibilityController()->announce(muse::qtrc("notation", "Current tempo: %1 BPM").arg(bpm));
 }
 
@@ -1667,19 +1667,26 @@ void NotationActionController::openSetTempoDialog()
         return;
     }
 
-    interactive()->open("musescore://notation/settempo")
-    .onResolve(this, [this](const Val& v) {
-        int bpm = boundedTempoBpm(v.toInt());
-        auto interaction = currentNotationInteraction();
-        if (!interaction) {
-            return;
-        }
+    int currentBpm = currentTempoBpm();
 
-        if (interaction->setTempoAtCurrentPosition(bpm)) {
-            accessibilityController()->announce(muse::qtrc("notation", "Tempo set to %1 BPM").arg(bpm));
-        } else {
-            accessibilityController()->announce(muse::qtrc("notation", "Select a note or rest to set tempo"));
-        }
+    QTimer::singleShot(0, [this, currentBpm]() {
+        UriQuery query("musescore://notation/settempo");
+        query.addParam("tempoBpm", Val(currentBpm));
+
+        interactive()->open(query)
+        .onResolve(this, [this](const Val& v) {
+            int bpm = boundedTempoBpm(v.toInt());
+            auto interaction = currentNotationInteraction();
+            if (!interaction) {
+                return;
+            }
+
+            if (interaction->setTempoAtCurrentPosition(bpm)) {
+                accessibilityController()->announce(muse::qtrc("notation", "Tempo set to %1 BPM").arg(bpm));
+            } else {
+                accessibilityController()->announce(muse::qtrc("notation", "Select a note or rest to set tempo"));
+            }
+        });
     });
 }
 
@@ -1922,6 +1929,20 @@ bool NotationActionController::currentTempoTick(Fraction& tick) const
 
     tick = item->tick();
     return true;
+}
+int NotationActionController::currentTempoBpm() const
+{
+    mu::engraving::Score* score = currentNotationScore();
+    if (!score) {
+        return MIN_TEMPO_BPM;
+    }
+
+    Fraction tick;
+    if (!currentTempoTick(tick)) {
+        return MIN_TEMPO_BPM;
+    }
+
+    return boundedTempoBpm(static_cast<int>(std::lround(score->tempo(tick).toBPM().val)));
 }
 
 void NotationActionController::addImage()
