@@ -11,10 +11,8 @@
 
 using namespace mu::appshell;
 using namespace muse::actions;
-using namespace muse::ui;
 using ::testing::_;
 using ::testing::Return;
-using ::testing::InSequence;
 
 class CommandPaletteModelTests : public ::testing::Test
 {
@@ -62,22 +60,24 @@ TEST_F(CommandPaletteModelTests, RunSelected_DefersDispatch)
 
     m_model.load();
 
-    // Use InSequence to assert: dispatch does NOT happen synchronously
-    // during runSelected(), but DOES happen after the event loop processes
-    // the deferred invocation.
-    {
-        InSequence seq;
-        EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
-            .Times(0);
-        EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
-            .Times(1);
-    }
+    // Expectation: dispatch does NOT happen synchronously during runSelected().
+    // This is a strict expectation — any synchronous call to dispatch() will
+    // fail the test. The expectation retires immediately (Times(0) is vacuously
+    // satisfied), so the deferred call below won't match it.
+    EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
+        .Times(0);
 
     m_model.setSelectedIndex(0);
     bool result = m_model.runSelected();
     EXPECT_TRUE(result);
 
-    // Process deferred events — the QueuedConnection dispatch fires here.
+    // Flush any synchronous expectations before the deferred call fires.
+    testing::Mock::VerifyAndClearExpectations(&m_dispatcherMock);
+
+    // After processing deferred events, the QueuedConnection dispatch fires.
+    EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
+        .Times(1);
+
     QTest::qWait(10);
 }
 
