@@ -1667,19 +1667,26 @@ void NotationActionController::openSetTempoDialog()
         return;
     }
 
-    interactive()->open("musescore://notation/settempo")
-    .onResolve(this, [this](const Val& v) {
-        int bpm = boundedTempoBpm(v.toInt());
-        auto interaction = currentNotationInteraction();
-        if (!interaction) {
-            return;
-        }
+    int currentBpm = currentTempoBpm();
 
-        if (interaction->setTempoAtCurrentPosition(bpm)) {
-            accessibilityController()->announce(muse::qtrc("notation", "Tempo set to %1 BPM").arg(bpm));
-        } else {
-            accessibilityController()->announce(muse::qtrc("notation", "Select a note or rest to set tempo"));
-        }
+    QTimer::singleShot(0, [this, currentBpm]() {
+        UriQuery query("musescore://notation/settempo");
+        query.addParam("tempoBpm", Val(currentBpm));
+
+        interactive()->open(query)
+        .onResolve(this, [this](const Val& v) {
+            int bpm = boundedTempoBpm(v.toInt());
+            auto interaction = currentNotationInteraction();
+            if (!interaction) {
+                return;
+            }
+
+            if (interaction->setTempoAtCurrentPosition(bpm)) {
+                accessibilityController()->announce(muse::qtrc("notation", "Tempo set to %1 BPM").arg(bpm));
+            } else {
+                accessibilityController()->announce(muse::qtrc("notation", "Select a note or rest to set tempo"));
+            }
+        });
     });
 }
 
