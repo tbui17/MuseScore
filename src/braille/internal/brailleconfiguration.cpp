@@ -34,6 +34,7 @@ static const Settings::Key BRAILLE_STATUS(module_name, "score/braille/status");
 static const Settings::Key BRAILLE_SIX_KEY_INPUT_ENABLED(module_name, "score/braille/sixKeyInputEnabled");
 static const Settings::Key BRAILLE_TABLE(module_name, "score/braille/table");
 static const Settings::Key BRAILLE_INTERVAL_DIRECTION(module_name, "score/braille/intervalDirection");
+static const Settings::Key BRAILLE_ADVANCE_CURSOR_AFTER_DOT(module_name, "score/braille/advanceCursorAfterDot");
 
 void BrailleConfiguration::init()
 {
@@ -44,6 +45,10 @@ void BrailleConfiguration::init()
     settings()->setDefaultValue(BRAILLE_SIX_KEY_INPUT_ENABLED, Val(false));
     settings()->valueChanged(BRAILLE_SIX_KEY_INPUT_ENABLED).onReceive(this, [this](const Val&) {
         m_sixKeyInputEnabledChanged.notify();
+    });
+    settings()->setDefaultValue(BRAILLE_ADVANCE_CURSOR_AFTER_DOT, Val(false));
+    settings()->valueChanged(BRAILLE_ADVANCE_CURSOR_AFTER_DOT).onReceive(this, [this](const Val&) {
+        m_advanceCursorAfterDotChanged.notify();
     });
     settings()->setDefaultValue(BRAILLE_TABLE, Val("Unified English uncontracted braille [en-ueb-g1.ctb]"));
     settings()->valueChanged(BRAILLE_TABLE).onReceive(this, [this](const Val&) {
@@ -83,6 +88,20 @@ bool BrailleConfiguration::sixKeyInputEnabled() const
 void BrailleConfiguration::setSixKeyInputEnabled(const bool enabled)
 {
     settings()->setSharedValue(BRAILLE_SIX_KEY_INPUT_ENABLED, Val(enabled));
+}
+muse::async::Notification BrailleConfiguration::advanceCursorAfterDotChanged() const
+{
+    return m_advanceCursorAfterDotChanged;
+}
+
+bool BrailleConfiguration::advanceCursorAfterDot() const
+{
+    return settings()->value(BRAILLE_ADVANCE_CURSOR_AFTER_DOT).toBool();
+}
+
+void BrailleConfiguration::setAdvanceCursorAfterDot(const bool enabled)
+{
+    settings()->setSharedValue(BRAILLE_ADVANCE_CURSOR_AFTER_DOT, Val(enabled));
 }
 
 muse::async::Notification BrailleConfiguration::intervalDirectionChanged() const

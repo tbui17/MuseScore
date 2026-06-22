@@ -916,6 +916,9 @@ void NotationBraille::setKeys(const QString& sequence)
             LOGD() << "dot " << brailleInput()->dots();
             if (brailleInput()->dots() > 0) {
                 interaction()->increaseDecreaseDuration(-brailleInput()->dots(), true);
+                if (brailleConfiguration()->advanceCursorAfterDot()) {
+                    interaction()->noteInput()->advanceCursor();
+                }
             }
             brailleInput()->reset();
             break;

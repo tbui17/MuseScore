@@ -91,6 +91,7 @@ public:
 
     muse::async::Notification noteAdded() const override;
     muse::async::Notification stateChanged() const override;
+    void advanceCursor() override;
 
     void setGetViewRectFunc(const std::function<muse::RectF()>& func);
 
