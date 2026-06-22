@@ -61,6 +61,9 @@ public:
     MOCK_METHOD(muse::async::Notification, sixKeyInputEnabledChanged, (), (const, override));
     MOCK_METHOD(bool, sixKeyInputEnabled, (), (const, override));
     MOCK_METHOD(void, setSixKeyInputEnabled, (const bool), (override));
+    MOCK_METHOD(muse::async::Notification, advanceCursorAfterDotChanged, (), (const, override));
+    MOCK_METHOD(bool, advanceCursorAfterDot, (), (const, override));
+    MOCK_METHOD(void, setAdvanceCursorAfterDot, (const bool), (override));
 
     MOCK_METHOD(muse::async::Notification, intervalDirectionChanged, (), (const, override));
     MOCK_METHOD(BrailleIntervalDirection, intervalDirection, (), (const, override));
@@ -132,6 +135,7 @@ public:
     MOCK_METHOD(muse::RectF, cursorRect, (), (const, override));
     MOCK_METHOD(muse::async::Notification, noteAdded, (), (const, override));
     MOCK_METHOD(muse::async::Notification, stateChanged, (), (const, override));
+    MOCK_METHOD(void, advanceCursor, (), (override));
 };
 
 class NotationViewInputControllerTests : public ::testing::Test
@@ -1459,4 +1463,23 @@ TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ClearInputBuffer_Cle
 
     QKeyEvent* jRelease = make_keyEvent(QEvent::KeyRelease, Qt::Key_J);
     m_controller->keyReleaseEvent(jRelease);
+}
+TEST_F(NotationViewInputControllerTests, BrailleConfigurationMock_AdvanceCursorAfterDot_DefaultsToFalse)
+{
+    EXPECT_CALL(*m_brailleConfiguration, advanceCursorAfterDot())
+        .WillOnce(Return(false));
+    EXPECT_FALSE(m_brailleConfiguration->advanceCursorAfterDot());
+}
+ 
+TEST_F(NotationViewInputControllerTests, BrailleConfigurationMock_AdvanceCursorAfterDot_CanBeEnabled)
+{
+    EXPECT_CALL(*m_brailleConfiguration, advanceCursorAfterDot())
+        .WillOnce(Return(true));
+    EXPECT_TRUE(m_brailleConfiguration->advanceCursorAfterDot());
+}
+ 
+TEST_F(NotationViewInputControllerTests, NotationNoteInputMock_AdvanceCursor_IsCallable)
+{
+    EXPECT_CALL(*m_noteInput, advanceCursor()).Times(1);
+    m_noteInput->advanceCursor();
 }

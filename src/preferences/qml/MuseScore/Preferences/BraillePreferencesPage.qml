@@ -44,12 +44,16 @@ PreferencesPage {
 
         BrailleSection {
             braillePanelEnabled: preferencesModel.braillePanelEnabled
+            advanceCursorAfterDot: preferencesModel.advanceCursorAfterDot
 
             navigation.section: root.navigationSection
             navigation.order: root.navigationOrderStart + 1
 
             onBraillePanelEnabledChangeRequested: function(val) {
                 preferencesModel.braillePanelEnabled = val;
+            }
+            onAdvanceCursorAfterDotChangeRequested: function(val) {
+                preferencesModel.advanceCursorAfterDot = val;
             }
         }
 

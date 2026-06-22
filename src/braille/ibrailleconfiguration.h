@@ -44,6 +44,9 @@ public:
     virtual muse::async::Notification sixKeyInputEnabledChanged() const = 0;
     virtual bool sixKeyInputEnabled() const = 0;
     virtual void setSixKeyInputEnabled(const bool enabled) = 0;
+    virtual muse::async::Notification advanceCursorAfterDotChanged() const = 0;
+    virtual bool advanceCursorAfterDot() const = 0;
+    virtual void setAdvanceCursorAfterDot(const bool enabled) = 0;
 
     virtual muse::async::Notification intervalDirectionChanged() const = 0;
     virtual BrailleIntervalDirection intervalDirection() const = 0;

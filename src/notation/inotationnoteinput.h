@@ -79,6 +79,7 @@ public:
 
     virtual muse::async::Notification noteAdded() const = 0;
     virtual muse::async::Notification stateChanged() const = 0;
+    virtual void advanceCursor() = 0;
 };
 
 using INotationNoteInputPtr = std::shared_ptr<INotationNoteInput>;

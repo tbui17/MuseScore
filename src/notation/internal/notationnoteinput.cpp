@@ -961,6 +961,16 @@ void NotationNoteInput::notifyAboutStateChanged()
 {
     m_stateChanged.notify();
 }
+void NotationNoteInput::advanceCursor()
+{
+    score()->inputState().moveToNextInputPos();
+
+    notifyAboutStateChanged();
+
+    if (mu::engraving::ChordRest* chordRest = score()->inputState().cr()) {
+        m_interaction->showItem(chordRest);
+    }
+}
 
 void NotationNoteInput::notifyNoteAddedChanged()
 {

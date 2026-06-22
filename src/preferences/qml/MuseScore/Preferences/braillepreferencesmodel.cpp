@@ -47,6 +47,9 @@ void BraillePreferencesModel::load()
     brailleConfiguration()->brailleTableChanged().onNotify(this, [this]() {
         emit brailleTableChanged(brailleTable());
     });
+    brailleConfiguration()->advanceCursorAfterDotChanged().onNotify(this, [this]() {
+        emit advanceCursorAfterDotChanged(advanceCursorAfterDot());
+    });
 }
 
 bool BraillePreferencesModel::braillePanelEnabled() const
@@ -62,6 +65,10 @@ QString BraillePreferencesModel::brailleTable() const
 int BraillePreferencesModel::intervalDirection() const
 {
     return static_cast<int>(brailleConfiguration()->intervalDirection());
+}
+bool BraillePreferencesModel::advanceCursorAfterDot() const
+{
+    return brailleConfiguration()->advanceCursorAfterDot();
 }
 
 QStringList BraillePreferencesModel::brailleTables() const
@@ -118,4 +125,13 @@ void BraillePreferencesModel::setIntervalDirection(int direction)
 
     brailleConfiguration()->setIntervalDirection(static_cast<BrailleIntervalDirection>(direction));
     emit intervalDirectionChanged(direction);
+}
+void BraillePreferencesModel::setAdvanceCursorAfterDot(bool value)
+{
+    if (value == advanceCursorAfterDot()) {
+        return;
+    }
+ 
+    brailleConfiguration()->setAdvanceCursorAfterDot(value);
+    emit advanceCursorAfterDotChanged(value);
 }

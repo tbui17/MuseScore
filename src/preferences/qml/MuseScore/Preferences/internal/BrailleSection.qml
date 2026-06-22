@@ -32,6 +32,8 @@ BaseSection {
 
     property alias braillePanelEnabled: brailleBox.checked
     signal braillePanelEnabledChangeRequested(bool enabled)
+    property alias advanceCursorAfterDot: advanceCursorBox.checked
+    signal advanceCursorAfterDotChangeRequested(bool enabled)
 
     CheckBox {
         id: brailleBox
@@ -45,6 +47,20 @@ BaseSection {
 
         onClicked: {
             root.braillePanelEnabledChangeRequested(!checked);
+        }
+    }
+    CheckBox {
+        id: advanceCursorBox
+        width: parent.width
+ 
+        text: qsTrc("preferences", "Advance cursor after adding dots")
+ 
+        navigation.name: "AdvanceCursorAfterDotBox"
+        navigation.panel: root.navigation
+        navigation.row: 1
+ 
+        onClicked: {
+            root.advanceCursorAfterDotChangeRequested(!checked);
         }
     }
 }
