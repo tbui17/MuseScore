@@ -106,7 +106,6 @@ QString MuseScoreGuiApp::mainWindowQmlPath(const QString& platform) const
 
 void MuseScoreGuiApp::doStartupScenario(const muse::modularity::ContextPtr& ctxId)
 {
-    LOGI() << "doStartupScenario: entered";
     auto startupScenario = muse::modularity::ioc(ctxId)->resolve<IStartupScenario>("app");
 
     //! NOTE Apply startup options
@@ -129,11 +128,9 @@ void MuseScoreGuiApp::doStartupScenario(const muse::modularity::ContextPtr& ctxI
 
     startupScenario->runOnSplashScreen();
 
-    LOGI() << "doStartupScenario: runOnSplashScreen done, scheduling queued invokeMethod";
     QString testflowScript = options->testflow.testCaseNameOrFile;
 
     QMetaObject::invokeMethod(qApp, [this, ctxId, startupScenario, testflowScript]() {
-        LOGI() << "doStartupScenario: queued lambda entered";
 #ifdef MUE_ENABLE_SPLASHSCREEN
         if (m_splashScreen) {
             m_splashScreen->close();
@@ -143,14 +140,12 @@ void MuseScoreGuiApp::doStartupScenario(const muse::modularity::ContextPtr& ctxI
 #endif
 
         startupScenario->runAfterSplashScreen();
-        LOGI() << "doStartupScenario: runAfterSplashScreen done";
 
         if (!testflowScript.isEmpty()) {
-           LOGI() << "doStartupScenario: scheduling testflow for " << testflowScript;
             // Defer until the QML main window is fully loaded so that
             // api.keyboard, api.navigation, and api.dispatcher have real
             // targets. The startup page is a local QML file that loads in
-            // milliseconds; 2s is generous even on slow machines.
+            // milliseconds; 5s accounts for slower CI runners.
             QTimer::singleShot(5000, [this, ctxId]() {
                 processTestflow(ctxId);
             });
@@ -186,8 +181,6 @@ void MuseScoreGuiApp::processTestflow(const muse::modularity::ContextPtr& ctxId)
 {
     using namespace muse::testflow;
 
-    LOGI() << "processTestflow: entered";
-
     muse::ContextInject<ITestflow> testflow = { ctxId };
 
     const std::shared_ptr<MuseScoreCmdOptions> options = std::dynamic_pointer_cast<MuseScoreCmdOptions>(contextData(ctxId).options);
@@ -212,8 +205,6 @@ void MuseScoreGuiApp::processTestflow(const muse::modularity::ContextPtr& ctxId)
 
     ITestflow::Status st = testflow()->status();
     int exitCode = (st == ITestflow::Status::Finished) ? 0 : 1;
-    LOGI() << "processTestflow: finished with status " << ITestflow::statusToString(st).toStdString()
-           << ", exit code " << exitCode;
 
     // Use std::exit instead of qApp->exit to avoid a SIGSEGV during context
     // teardown. execScript() calls affectOnServices() which swaps the
