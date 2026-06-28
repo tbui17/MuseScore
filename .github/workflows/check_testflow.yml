@@ -69,8 +69,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
           $iniPath = "$settingsDir\MuseScoreStudio5.ini"
           $content = @"
-[mu.appshell]
-application/hasCompletedFirstLaunchSetup=true
+[application]
+hasCompletedFirstLaunchSetup=true
 "@
           Set-Content -Path $iniPath -Value $content -Encoding UTF8
           Write-Host "Wrote settings to $iniPath"
