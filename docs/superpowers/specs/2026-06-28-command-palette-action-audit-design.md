@@ -100,27 +100,33 @@ The script maintains a mapping from module name to controller class name, since 
 | `project` | `ProjectActionController` | `project/internal/projectuiactions.cpp` |
 | `notation` | `NotationActionController` | (shares notationscene's controller) |
 | `palette` | *(none — uses direct dispatch)* | `palette/internal/paletteuiactions.cpp` |
-| `preferences` | `ApplicationActionController` | (uses appshell's controller) |
-| `instrumentsscene` | `NotationActionController` | (shares notationscene's controller) |
-| `musesounds` | `ApplicationActionController` | (uses appshell's controller) |
+| `preferences` | *(none — opens via appshell's preference-dialog action)* | N/A |
+| `instrumentsscene` | `InstrumentsActionsController` | `instrumentsscene/internal/instrumentsactionscontroller.cpp` |
+| `musesounds` | *(none — no dispatcher registrations)* | N/A |
 | `engraving` | *(dev-only — diagnostics)* | N/A |
 
 If a module isn't in the table, the script prints a warning and skips `--generate` for that candidate. The agent can add the mapping manually.
 
 ## URI-to-Action-Code Normalization
 
-URIs and action codes don't match directly. The script normalizes both:
-
-- URI `musescore://notation/settempo` → normalize → `set-tempo`
-- Action code `set-tempo` → normalize → `set-tempo`
-- Match!
+URIs and action codes don't match directly. The script normalizes both, then compares them.
 
 Normalization steps:
 1. Strip `musescore://` prefix
 2. Strip the module segment (first path component, e.g., `notation/`, `playback/`)
-3. Convert remaining segment(s) to kebab-case (insert `-` before capitals, lowercase)
+3. Convert remaining segment(s) to kebab-case:
+   - Insert `-` before capitals (camelCase → kebab-case): `gotomeasure` → `gotoMeasure` → `goto-measure`
+   - Split on existing `-` and rejoin: `set-tempo` stays `set-tempo`
+   - For all-lowercase segments with no capitals, leave as-is: `settempo` → `settempo`
+4. For matching, compare normalized forms. If either side has a `-` the other lacks, attempt a **fuzzy match** by removing all `-` and comparing: `settempo` == `settempo` → match
 
-If a normalized URI matches a normalized action code, the URI is considered "already registered" and excluded from candidates.
+If a normalized URI matches a normalized action code (exact or fuzzy), the URI is considered "already registered" and excluded from candidates.
+
+**Example:**
+- URI `musescore://notation/settempo` → strip prefix → `notation/settempo` → strip module → `settempo`
+- Action code `set-tempo` → normalize → `set-tempo`
+- Exact match? `settempo` != `set-tempo` → no
+- Fuzzy match (remove `-`)? `settempo` == `settempo` → yes → already registered
 
 ## Deny-List Rules
 
