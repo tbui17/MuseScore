@@ -174,6 +174,7 @@ void CommandLineParser::init()
 
     // Testflow
     m_parser.addOption(QCommandLineOption("test-case", "Run test case by name or file", "nameOrFile"));
+    m_parser.addOption(QCommandLineOption("test-case-gui", "Run test case by name or file in GUI mode", "nameOrFile"));
     m_parser.addOption(QCommandLineOption("test-case-context", "Set test case context by name or file", "nameOrFile"));
     m_parser.addOption(QCommandLineOption("test-case-context-value", "Set test case context value", "value"));
     m_parser.addOption(QCommandLineOption("test-case-func", "Call test case function", "name"));
@@ -534,6 +535,14 @@ void CommandLineParser::parse(int argc, char** argv)
     if (m_parser.isSet("test-case")) {
         m_options->runMode = IApplication::RunMode::ConsoleApp;
         m_options->testflow.testCaseNameOrFile = fromUserInputPath(m_parser.value("test-case"));
+    }
+
+    if (m_parser.isSet("test-case-gui")) {
+        if (m_parser.isSet("test-case")) {
+            qWarning("Cannot use --test-case and --test-case-gui together");
+            std::exit(1);
+        }
+        m_options->testflow.testCaseNameOrFile = fromUserInputPath(m_parser.value("test-case-gui"));
     }
 
     if (m_parser.isSet("test-case-context")) {

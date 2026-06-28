@@ -44,6 +44,8 @@ private:
     QString mainWindowQmlPath(const QString& platform) const override;
     void doStartupScenario(const muse::modularity::ContextPtr& ctxId) override;
 
+    void processTestflow(const muse::modularity::ContextPtr& ctxId);
+
     appshell::SplashScreen* m_splashScreen = nullptr;
 };
 }
