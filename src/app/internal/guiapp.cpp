@@ -106,6 +106,7 @@ QString MuseScoreGuiApp::mainWindowQmlPath(const QString& platform) const
 
 void MuseScoreGuiApp::doStartupScenario(const muse::modularity::ContextPtr& ctxId)
 {
+    LOGI() << "doStartupScenario: entered";
     auto startupScenario = muse::modularity::ioc(ctxId)->resolve<IStartupScenario>("app");
 
     //! NOTE Apply startup options
@@ -128,9 +129,11 @@ void MuseScoreGuiApp::doStartupScenario(const muse::modularity::ContextPtr& ctxI
 
     startupScenario->runOnSplashScreen();
 
+    LOGI() << "doStartupScenario: runOnSplashScreen done, scheduling queued invokeMethod";
     QString testflowScript = options->testflow.testCaseNameOrFile;
 
     QMetaObject::invokeMethod(qApp, [this, ctxId, startupScenario, testflowScript]() {
+        LOGI() << "doStartupScenario: queued lambda entered";
 #ifdef MUE_ENABLE_SPLASHSCREEN
         if (m_splashScreen) {
             m_splashScreen->close();
@@ -140,6 +143,7 @@ void MuseScoreGuiApp::doStartupScenario(const muse::modularity::ContextPtr& ctxI
 #endif
 
         startupScenario->runAfterSplashScreen();
+        LOGI() << "doStartupScenario: runAfterSplashScreen done";
 
         if (!testflowScript.isEmpty()) {
            LOGI() << "doStartupScenario: scheduling testflow for " << testflowScript;
