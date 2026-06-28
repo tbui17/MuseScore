@@ -31,6 +31,7 @@ install(FILES
       TC8_EngravingText.js
       "TC9_BigScore(perfomance).js"
       "TC10_PlayToggle.js"
+      TC11_CommandPaletteDialog.js
       DESTINATION ${MUSE_APP_INSTALL_RESOURCES_LOCATION}/testflowscripts
       )
 
