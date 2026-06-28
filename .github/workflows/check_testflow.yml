@@ -48,7 +48,7 @@ jobs:
       - name: Setup environment
         run: buildscripts\ci\windows\setup.bat
 
-      - name: Build (Debug)
+      - name: Build (RelWithDebInfo)
         shell: cmd
         env:
           # The muse_deps repo restructured its layout; the old
@@ -61,17 +61,16 @@ jobs:
           XCOPY "C:\musescore_dependencies" %CD% /E /I /Y
           SET "JACK_DIR=C:\Program Files (x86)\Jack"
           SET "PATH=%JACK_DIR%;%PATH%"
-          ninja_build.bat -t debug
+          ninja_build.bat -t relwithdebinfo
 
       - name: Run testflow GUI test
         shell: pwsh
         timeout-minutes: 10
-        continue-on-error: true
         env:
           # Force software rendering to avoid GPU probe hang
           QT_QUICK_BACKEND: 'software'
         run: |
-          $exe = Join-Path $PWD "build.debug\MuseScoreStudio5.exe"
+          $exe = Join-Path $PWD "build.release\MuseScoreStudio5.exe"
           $script = Join-Path $PWD "share\testflowscripts\TC11_CommandPaletteDialog.js"
           if (-not (Test-Path $exe)) {
             Write-Host "::error::Build output not found: $exe"
@@ -85,13 +84,13 @@ jobs:
           $proc = Start-Process -FilePath $exe -ArgumentList "--test-case-gui",$script -Wait -PassThru -WorkingDirectory $PWD
           $exitCode = $proc.ExitCode
           if ($exitCode -ne 0) {
-            Write-Host "::warning::Testflow GUI test failed or timed out (exit code $exitCode). This is expected on CI runners without a full desktop session — the test passes locally. The regression is covered by check_unit_tests.yml."
-          } else {
-            Write-Host "Testflow passed!"
+            Write-Host "::error::Testflow failed with exit code $exitCode"
+            exit $exitCode
           }
+          Write-Host "Testflow passed!"
 
-      - name: Collect logs
-        if: always()
+      - name: Collect logs on failure
+        if: failure()
         shell: pwsh
         run: |
           $logDir = "$env:LOCALAPPDATA\MuseScore\MuseScoreStudio5Development\logs"
@@ -104,7 +103,7 @@ jobs:
           }
 
       - name: Upload logs
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: testflow-logs
