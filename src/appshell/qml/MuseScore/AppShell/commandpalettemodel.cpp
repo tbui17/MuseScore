@@ -6,6 +6,7 @@
 #include "commandpalettemodel.h"
 
 #include <algorithm>
+#include <QTimer>
 
 #include "translation.h"
 
@@ -135,9 +136,20 @@ bool CommandPaletteModel::run(int row)
     // transient parent becoming invisible and closes the new dialog.
     // Deferring lets the palette leave the stack first, so the new
     // dialog's transient parent is the main window.
-    QMetaObject::invokeMethod(this, [this, actionCode]() {
-        dispatcher()->dispatch(actionCode);
-    }, Qt::QueuedConnection);
+    //
+    // IMPORTANT: The dispatcher is an app-wide singleton resolved via IoC,
+    // not owned by this model. We capture the shared_ptr directly and use
+    // QTimer::singleShot (no context object) so the dispatch survives even
+    // if this model is destroyed before the event fires. The model is a QML
+    // child of CommandPaletteDialog and is destroyed when the dialog closes
+    // (InteractiveProvider.qml:127 calls obj.destroy() → deleteLater()).
+    // Posting via QMetaObject::invokeMethod(this, ...) would cause the
+    // queued event to be discarded by removePostedEvents when this is
+    // destroyed — the dispatch would silently never fire.
+    auto dp = dispatcher();
+    QTimer::singleShot(0, [dp, actionCode]() {
+        dp->dispatch(actionCode);
+    });
 
     return true;
 }

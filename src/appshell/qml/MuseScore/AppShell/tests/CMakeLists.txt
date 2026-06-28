@@ -23,15 +23,23 @@ set(MODULE_TEST muse_appshell_qml_tests)
 set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/environment.cpp
     ${CMAKE_CURRENT_LIST_DIR}/commandpalettemodel_tests.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../commandpalettemodel.cpp
 )
 
 set(MODULE_TEST_LINK
-    appshell_qml
     muse::actions
     muse::ui
     muse::global
+    Qt6::Test
 )
 
 set(MODULE_TEST_DATA_ROOT ${CMAKE_CURRENT_LIST_DIR})
+
+set(MODULE_TEST_INCLUDE
+    ${CMAKE_CURRENT_LIST_DIR}/..
+    ${CMAKE_CURRENT_LIST_DIR}/../../../..
+)
+
+find_package(Qt6Test REQUIRED)
 
 include(SetupGTest)

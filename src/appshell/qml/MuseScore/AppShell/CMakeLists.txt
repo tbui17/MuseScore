@@ -161,6 +161,6 @@ target_include_directories(appshell_qml PRIVATE
     FirstLaunchSetup
     PublishPage
 )
-if(BUILD_TESTING)
+if(BUILD_TESTING AND MUSE_ENABLE_UNIT_TESTS)
     add_subdirectory(tests)
 endif()
