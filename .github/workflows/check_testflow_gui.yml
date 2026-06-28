@@ -8,7 +8,7 @@ on:
       - 'share/testflowscripts/**'
       - 'muse/framework/interactive/**'
       - 'muse/framework/testflow/**'
-      - '.github/workflows/check_testflow.yml'
+      - '.github/workflows/check_testflow_gui.yml'
   push:
     branches: [main]
     paths:
@@ -17,7 +17,7 @@ on:
       - 'share/testflowscripts/**'
       - 'muse/framework/interactive/**'
       - 'muse/framework/testflow/**'
-      - '.github/workflows/check_testflow.yml'
+      - '.github/workflows/check_testflow_gui.yml'
   workflow_dispatch:
 
 concurrency:
