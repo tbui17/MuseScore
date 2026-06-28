@@ -48,9 +48,10 @@ jobs:
       - name: Pre-seed MuseScore settings
         shell: pwsh
         run: |
-          $settingsDir = "$env:LOCALAPPDATA\MuseScore\MuseScoreStudio5Development"
+          # QSettings (IniFormat, UserScope) stores at %APPDATA%\MuseScore\MuseScoreStudio5Development.ini
+          $settingsDir = "$env:APPDATA\MuseScore"
           New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
-          $iniPath = "$settingsDir\MuseScoreStudio5.ini"
+          $iniPath = "$settingsDir\MuseScoreStudio5Development.ini"
           "[application]`r`nhasCompletedFirstLaunchSetup=true" | Set-Content -Path $iniPath -Encoding UTF8
           Write-Host "Wrote settings to $iniPath"
 
