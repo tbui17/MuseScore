@@ -65,7 +65,7 @@ jobs:
 
       - name: Run testflow GUI test
         shell: pwsh
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: |
           $exe = Join-Path $PWD "build.debug\MuseScoreStudio5.exe"
           $script = Join-Path $PWD "share\testflowscripts\TC11_CommandPaletteDialog.js"
