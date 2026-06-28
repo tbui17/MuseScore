@@ -188,7 +188,7 @@ void MuseScoreGuiApp::processTestflow(const muse::modularity::ContextPtr& ctxId)
 
     const std::shared_ptr<MuseScoreCmdOptions> options = std::dynamic_pointer_cast<MuseScoreCmdOptions>(contextData(ctxId).options);
     IF_ASSERT_FAILED(options) {
-        QMetaObject::invokeMethod(qApp, []() { qApp->exit(1); }, Qt::QueuedConnection);
+        std::exit(1);
         return;
     }
 
@@ -200,11 +200,10 @@ void MuseScoreGuiApp::processTestflow(const muse::modularity::ContextPtr& ctxId)
 
     // execScript is synchronous: it runs the JS script to completion,
     // sets status to Finished/Error, and calls restoreAffectOnServices()
-    // before returning. We check the status after it returns and defer
-    // the exit so the event loop can clean up before teardown.
+    // before returning. We check the status after it returns.
     // We intentionally do NOT subscribe to statusChanged/stepStatusChanged
-    // channels because those callbacks would outlive the Testflow singleton
-    // during context destruction, causing a use-after-free SIGSEGV.
+    // channels — those callbacks would outlive the Testflow singleton
+    // during context destruction, causing a use-after-free.
     testflow()->execScript(options->testflow.testCaseNameOrFile, opt);
 
     ITestflow::Status st = testflow()->status();
@@ -213,13 +212,15 @@ void MuseScoreGuiApp::processTestflow(const muse::modularity::ContextPtr& ctxId)
            << ", exit code " << exitCode;
 
     // Use std::exit instead of qApp->exit to avoid a SIGSEGV during context
-    // teardown. execScript() calls affectOnServices() which replaces the
-    // IInteractive implementation in the IoC; restoreAffectOnServices()
-    // restores it, but the TestflowInteractive shared_ptr still references
-    // the real IInteractive during context destruction. The destruction
-    // order in BaseApplication::doDestroyContext (qDeleteAll on setups) can
-    // free the real IInteractive before the Testflow singleton, causing a
-    // use-after-free. Since execScript is synchronous and the test result is
-    // already determined, we skip Qt teardown entirely.
+    // teardown. execScript() calls affectOnServices() which swaps the
+    // IInteractive provider in the IoC; restoreAffectOnServices() swaps it
+    // back, but the IoC unregister/re-register cycle and incomplete state
+    // restoration (e.g. navigation highlight not reset) leave the framework
+    // in a state where BaseApplication::doDestroyContext crashes. This is a
+    // pre-existing framework-level IoC lifecycle bug, not specific to our
+    // code. Since execScript is synchronous and the test result is already
+    // determined, skipping Qt teardown is the correct tradeoff for a test
+    // runner. If the framework bug is fixed upstream, switch back to
+    // qApp->exit() for proper cleanup.
     std::exit(exitCode);
 }

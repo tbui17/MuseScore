@@ -24,6 +24,9 @@ Daily commands:
   test <script> [args...]
       Run a MuseScore app test-case script through the Debug executable.
 
+  test-gui <script> [args...]
+      Run a test-case script in GUI mode (with keyboard, navigation, and dialog interaction).
+
   release [args...]
       Release build to build.release/.
 
@@ -170,6 +173,34 @@ function Invoke-Test {
 
     $exePath = Require-DebugExecutable
     $invokeArgs = @("--test-case", $script) + $remainingArgs
+    Push-Location $RepoRoot
+    try {
+        & $exePath @invokeArgs
+        if (Test-Path Variable:\LASTEXITCODE) { exit $LASTEXITCODE }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Invoke-TestGui {
+    param(
+        [string[]] $TestArgs
+    )
+
+    if ($TestArgs.Count -lt 1) {
+        Show-TestUsage
+        exit 1
+    }
+
+    $script = $TestArgs[0]
+    $remainingArgs = @()
+    if ($TestArgs.Count -gt 1) {
+        $remainingArgs = $TestArgs[1..($TestArgs.Count - 1)]
+    }
+
+    $exePath = Require-DebugExecutable
+    $invokeArgs = @("--test-case-gui", $script) + $remainingArgs
     Push-Location $RepoRoot
     try {
         & $exePath @invokeArgs
@@ -356,6 +387,7 @@ try {
         "build" { Invoke-Build -BuildArgs $commandArgs }
         "run" { Invoke-Run -RunArgs $commandArgs }
         "test" { Invoke-Test -TestArgs $commandArgs }
+        "test-gui" { Invoke-TestGui -TestArgs $commandArgs }
         "clean" { Invoke-Clean -CleanArgs $commandArgs }
         "lint" { Invoke-Lint -LintArgs $commandArgs }
         "release" { Invoke-Ninja -Target "release" -BuildArgs $commandArgs }

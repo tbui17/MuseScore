@@ -25,13 +25,12 @@ var testCase = {
     description: "Verify that running a dialog-opening command from the command palette keeps the target dialog open (transient parent + deferred dispatch regression)",
     steps: [
         {name: "Open command palette", func: function() {
-            api.testflow.showMainWindowOnFront()
-            api.testflow.seeChanges(500)
             api.dispatcher.dispatch("command-palette")
             api.testflow.waitPopup()
             api.testflow.seeChanges(500)
         }},
         {name: "Type search for About dialog", func: function() {
+            api.testflow.seeChanges(500)
             api.keyboard.text("about musescore")
             api.testflow.seeChanges(500)
         }},
