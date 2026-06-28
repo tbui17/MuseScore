@@ -116,6 +116,12 @@ const UiActionList PlaybackUiActions::s_mainActions = {
              TranslatableString("action", "Playback setup"),
              TranslatableString("action", "Open playback setup dialog"),
              IconCode::Code::NONE
+            ),
+    UiAction("playback-speed",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Playback speed…"),
+             TranslatableString("action", "Set playback speed")
              )
 };
 

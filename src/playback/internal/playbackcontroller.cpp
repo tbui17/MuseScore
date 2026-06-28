@@ -21,6 +21,8 @@
  */
 #include "playbackcontroller.h"
 
+#include <algorithm>
+
 #include "async/notifylist.h"
 
 #include "modularity/ioc.h"
@@ -70,6 +72,7 @@ static const ActionCode PAN_CODE("pan");
 static const ActionCode REPEAT_CODE("repeat");
 static const ActionCode PLAY_CHORD_SYMBOLS_CODE("play-chord-symbols");
 static const ActionCode PLAYBACK_SETUP("playback-setup");
+static const ActionCode PLAYBACK_SPEED_CODE("playback-speed");
 static const ActionCode TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE("toggle-hear-playback-when-editing");
 
 static AudioOutputParams makeReverbOutputParams()
@@ -131,6 +134,7 @@ void PlaybackController::init()
     dispatcher()->reg(this, PLAYBACK_SETUP, this, &PlaybackController::openPlaybackSetupDialog);
     dispatcher()->reg(this, TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE, this, &PlaybackController::toggleHearPlaybackWhenEditing);
     dispatcher()->reg(this, "playback-reload-cache", this, &PlaybackController::reloadPlaybackCache);
+    dispatcher()->reg(this, PLAYBACK_SPEED_CODE, this, &PlaybackController::openPlaybackSpeedDialog);
 
     m_onlineSoundsController->regActions();
 
@@ -1054,6 +1058,19 @@ void PlaybackController::reloadPlaybackCache()
 void PlaybackController::openPlaybackSetupDialog()
 {
     interactive()->open("musescore://playback/soundprofilesdialog");
+}
+
+void PlaybackController::openPlaybackSpeedDialog()
+{
+    int currentPercent = std::round(tempoMultiplier() * 100);
+    UriQuery query("musescore://playback/speed");
+    query.addParam("speedPercent", Val(currentPercent));
+
+    interactive()->open(query).onResolve(this, [this](const Val& v) {
+        int percent = v.toInt();
+        double multiplier = std::clamp(percent / 100.0, 0.1, 3.0);
+        setTempoMultiplier(multiplier);
+    });
 }
 
 void PlaybackController::addLoopBoundary(LoopBoundaryType type)

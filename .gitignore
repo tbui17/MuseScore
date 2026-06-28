@@ -93,3 +93,17 @@ compile_commands.json
 
 # QML language server
 **/.qmlls.ini
+
+# Braille tables extracted from liblouis during build
+/tables/
+
+# Test run logs
+/ci-logs*/
+
+# Downloaded build deps (fdk-aac, harfbuzz, ASIOSDK) — populated by CMake
+/muse/buildscripts/cmake/deps/fdk-aac-2.0.3/
+/muse/buildscripts/cmake/deps/harfbuzz/
+/muse/buildscripts/cmake/deps/ASIOSDK/
+/muse/buildscripts/cmake/deps/fdk-aac_src.zip
+/muse/buildscripts/cmake/deps/harfbuzz_src.7z
+/muse/buildscripts/cmake/deps/ASIO-SDK_2.3.4_2025-10-15.zip

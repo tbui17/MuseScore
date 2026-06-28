@@ -36,6 +36,8 @@
 #include <QRegularExpressionMatch>
 #include <QEventLoop>
 
+#include <regex>
+
 #include "defer.h"
 #include "ptrutils.h"
 #include "containers.h"
@@ -6349,7 +6351,39 @@ bool NotationInteraction::setTempoAtCurrentPosition(int bpm)
         m_noteInput->endNoteInput();
     }
 
+    // Resolve the ChordRest and its segment to check for an existing TempoText
+    ChordRest* cr = nullptr;
+    if (item->isNote()) {
+        cr = toNote(item)->chord();
+    } else if (item->isChordRest()) {
+        cr = toChordRest(item);
+    }
+    Segment* segment = cr ? cr->segment() : nullptr;
+
     startEdit(TranslatableString("undoableAction", "Set tempo"));
+
+    // Check for an existing TempoText on this segment (tempo text is always track 0)
+    TempoText* existingTempo = segment
+        ? toTempoText(segment->findAnnotation(ElementType::TEMPO_TEXT, 0, 0))
+        : nullptr;
+
+    if (existingTempo) {
+        // Update existing tempo text's BPM instead of creating a duplicate
+        String xmlText = existingTempo->xmlText();
+       static const std::regex bpmRegex(R"(\s*=\s*\d+([.]\d+)?)");
+        std::string replaced = std::regex_replace(xmlText.toStdString(), bpmRegex,
+                                                  " = " + std::to_string(bpm));
+        // undoChangeProperty 2-arg form is public on EngravingObject; the 3-arg override
+        // on TempoText is protected, so call through the base to reach the virtual dispatch.
+        existingTempo->EngravingObject::undoChangeProperty(Pid::TEXT, PropertyValue(String::fromStdString(replaced)));
+        existingTempo->EngravingObject::undoChangeProperty(Pid::TEMPO_FOLLOW_TEXT, PropertyValue(true));
+        if (!existingTempo->followText()) {
+            existingTempo->updateTempo();
+        }
+       apply();
+        showItem(existingTempo);
+       return true;
+    }
 
     TextBase* text = score()->addText(TextStyleType::TEMPO, item);
     if (!text || !text->isTempoText()) {

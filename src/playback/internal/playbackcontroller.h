@@ -202,6 +202,8 @@ private:
 
     void openPlaybackSetupDialog();
 
+    void openPlaybackSpeedDialog();
+
     void addLoopBoundary(notation::LoopBoundaryType type);
     void addLoopBoundaryToTick(notation::LoopBoundaryType type, int tick);
     void updateLoop();

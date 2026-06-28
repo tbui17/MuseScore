@@ -32,6 +32,8 @@ install(FILES
       "TC9_BigScore(perfomance).js"
       "TC10_PlayToggle.js"
       TC11_CommandPaletteDialog.js
+      TC12_PlaybackSpeedDialog.js
+      TC13_SetTempoUpdate.js
       DESTINATION ${MUSE_APP_INSTALL_RESOURCES_LOCATION}/testflowscripts
       )
 

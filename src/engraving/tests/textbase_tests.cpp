@@ -25,11 +25,14 @@
 
 #include <gtest/gtest.h>
 
+#include <regex>
+
 #include "engraving/dom/chordrest.h"
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/stafftext.h"
+#include "engraving/dom/tempotext.h"
 #include "engraving/editing/textedit.h"
 
 #include "utils/scorerw.h"
@@ -257,4 +260,41 @@ TEST_F(Engraving_TextBaseTests, lineBreakTest)
 
         EXPECT_EQ(staffText->xmlText(), TEXT);
     }
+}
+
+TEST_F(Engraving_TextBaseTests, setTempoUpdatesExisting)
+{
+    MasterScore* score = ScoreRW::readScore(u"test.mscx");
+    ASSERT_TRUE(score);
+
+    // Get first ChordRest segment — test.mscx already has a TempoText here (BPM 100)
+    ChordRest* cr = score->firstSegment(SegmentType::ChordRest)->nextChordRest(0);
+    ASSERT_TRUE(cr);
+    Segment* seg = cr->segment();
+    ASSERT_TRUE(seg);
+
+    // Verify: one TempoText exists initially (from the file)
+    TempoText* existing = toTempoText(seg->findAnnotation(ElementType::TEMPO_TEXT, 0, 0));
+    ASSERT_TRUE(existing);
+    EXPECT_EQ(existing->tempoBpm(), 100.0);
+
+    // Simulate setTempoAtCurrentPosition update path (the fix)
+    score->startCmd(TranslatableString::untranslatable("Set tempo"));
+    String existingXml = existing->xmlText();
+    static const std::regex bpmRegex(R"(\s*=\s*\d+([.]\d+)?)");
+    std::string replaced = std::regex_replace(existingXml.toStdString(), bpmRegex, " = 140");
+   existing->EngravingObject::undoChangeProperty(Pid::TEXT, PropertyValue(String::fromStdString(replaced)));
+   existing->EngravingObject::undoChangeProperty(Pid::TEMPO_FOLLOW_TEXT, PropertyValue(true));
+    if (!existing->followText()) {
+        existing->updateTempo();
+    }
+    score->endCmd();
+
+    // Verify: still only ONE TempoText (no duplicate created)
+    auto tempos = seg->findAnnotations(ElementType::TEMPO_TEXT, 0, 0);
+    EXPECT_EQ(tempos.size(), 1u);
+    // Verify: BPM updated from 100 to 140
+    EXPECT_EQ(toTempoText(tempos[0])->tempoBpm(), 140.0);
+
+    delete score;
 }

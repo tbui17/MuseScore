@@ -81,6 +81,7 @@ qt_add_qml_module(playback_qml
         PlaybackToolBar.qml
         SoundFlagPopup.qml
         SoundProfilesDialog.qml
+       PlaybackSpeedDialog.qml
     IMPORTS
         TARGET muse_ui_qml
         TARGET muse_uicomponents_qml
