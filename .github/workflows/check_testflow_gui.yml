@@ -68,7 +68,7 @@ jobs:
           $settingsDir = "$env:APPDATA\MuseScore"
           New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
           $iniPath = "$settingsDir\MuseScoreStudio5Development.ini"
-          "[application]`r`nhasCompletedFirstLaunchSetup=true" | Set-Content -Path $iniPath -Encoding UTF8
+          "[application]`r`nhasCompletedFirstLaunchSetup=true`r`nwelcomeDialogShowOnStartup=false" | Set-Content -Path $iniPath -Encoding UTF8
           Write-Host "Wrote settings to $iniPath"
 
       - name: Run testflow GUI test
