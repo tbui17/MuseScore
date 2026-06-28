@@ -51,9 +51,12 @@ jobs:
       - name: Build (Debug)
         shell: cmd
         env:
-          # Disable audio export — fdk-aac.cmake at musescore/muse_deps
-          # returns 404. The testflow GUI test doesn't need audio export.
+          # The muse_deps repo restructured its layout; the old
+          # MuseDeps.cmake populate() downloads .cmake files from URLs
+          # that now return 404. Disable the two affected modules —
+          # the testflow GUI test needs neither audio export nor ASIO.
           MUSE_MODULE_AUDIO_EXPORT: 'OFF'
+          MUSE_MODULE_AUDIO_ASIO: 'OFF'
         run: |
           XCOPY "C:\musescore_dependencies" %CD% /E /I /Y
           SET "JACK_DIR=C:\Program Files (x86)\Jack"
