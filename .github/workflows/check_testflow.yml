@@ -1,4 +1,5 @@
 name: 'Check: Testflow (GUI)'
+# Testflow GUI integration test workflow
 
 on:
   pull_request:
