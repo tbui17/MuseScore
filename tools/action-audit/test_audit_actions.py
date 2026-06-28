@@ -3,10 +3,8 @@ from audit_actions import (
     CppParser,
     extract_register_qml_uri_calls,
     extract_ui_action_codes,
-    extract_dispatcher_reg_codes,
-    normalize_uri,
-    normalize_action_code,
-    fuzzy_match,
+    extract_open_calls,
+    extract_registrations,
     derive_action_code,
     derive_title,
     derive_module,
@@ -108,71 +106,135 @@ class TestUiActionExtraction:
         assert results[0] == "action://notation/copy"
 
 
-class TestDispatcherRegExtraction:
-    def test_extracts_dispatcher_reg(self):
-        """Extracts action code from dispatcher()->reg() calls."""
+class TestOpenCallExtraction:
+    def test_extracts_string_literal_uri(self):
+        """Extracts URI from interactive()->open("uri") with a string literal."""
         code = b'''
-        void Foo::init() {
-            dispatcher()->reg(this, "play", [this]() { togglePlay(); });
-            dispatcher()->reg(this, "stop", this, &Foo::stop);
+        void Controller::openDialog() {
+            interactive()->open("musescore://playback/speeddialog");
         }
         '''
         parser = CppParser()
         tree = parser.parse(code)
-        results = extract_dispatcher_reg_codes(tree, code)
-        assert len(results) == 2
-        assert "play" in results
-        assert "stop" in results
+        results = extract_open_calls(tree, code, "src/playback/internal/controller.cpp")
+        assert len(results) == 1
+        assert results[0].uri == "musescore://playback/speeddialog"
+        assert results[0].method_name == "openDialog"
+
+    def test_extracts_uri_call(self):
+        """Extracts URI from interactive()->open(Uri("uri"))."""
+        code = b'''
+        void Controller::openDialog() {
+            interactive()->open(Uri("musescore://project/export"));
+        }
+        '''
+        parser = CppParser()
+        tree = parser.parse(code)
+        results = extract_open_calls(tree, code, "src/project/internal/controller.cpp")
+        assert len(results) == 1
+        assert results[0].uri == "musescore://project/export"
+
+    def test_resolves_uri_variable(self):
+        """Resolves a Uri variable: static const Uri VAR("uri"); open(VAR)."""
+        code = b'''
+        void Controller::exportScore() {
+            static const Uri EXPORT_URI("musescore://project/export");
+            if (!interactive()->isOpened(EXPORT_URI).val) {
+                interactive()->open(EXPORT_URI);
+            }
+        }
+        '''
+        parser = CppParser()
+        tree = parser.parse(code)
+        results = extract_open_calls(tree, code, "src/project/internal/controller.cpp")
+        assert len(results) == 1
+        assert results[0].uri == "musescore://project/export"
+        assert results[0].method_name == "exportScore"
+
+    def test_finds_enclosing_method_name(self):
+        """Correctly identifies the enclosing method name."""
+        code = b'''
+        void NotationActionController::openEditGridSizeDialog() {
+            interactive()->open("musescore://notation/editgridsize");
+        }
+        '''
+        parser = CppParser()
+        tree = parser.parse(code)
+        results = extract_open_calls(tree, code, "src/notationscene/internal/controller.cpp")
+        assert len(results) == 1
+        assert results[0].method_name == "openEditGridSizeDialog"
+
+    def test_ignores_non_interactive_open(self):
+        """Does not extract calls from non-interactive()->open() calls."""
+        code = b'''
+        void Foo::bar() {
+            fileDialog->open("some/file/path");
+        }
+        '''
+        parser = CppParser()
+        tree = parser.parse(code)
+        results = extract_open_calls(tree, code, "src/foo/internal/controller.cpp")
+        assert len(results) == 0
+
+
+class TestRegistrationExtraction:
+    def test_extracts_lambda_handler(self):
+        """Extracts action code and method name from reg() with a lambda."""
+        code = b'''
+        void Controller::init() {
+            dispatcher()->reg(this, "play", [this]() { togglePlay(); });
+        }
+        '''
+        parser = CppParser()
+        tree = parser.parse(code)
+        results = extract_registrations(tree, code, "src/playback/internal/controller.cpp")
+        assert len(results) == 1
+        assert results[0].action_code == "play"
+        assert results[0].method_name == "togglePlay"
+
+    def test_extracts_function_pointer_handler(self):
+        """Extracts action code and method name from reg() with &Controller::method."""
+        code = b'''
+        void Controller::init() {
+            dispatcher()->reg(this, "about-musescore", this, &ApplicationActionController::openAboutDialog);
+        }
+        '''
+        parser = CppParser()
+        tree = parser.parse(code)
+        results = extract_registrations(tree, code, "src/appshell/internal/controller.cpp")
+        assert len(results) == 1
+        assert results[0].action_code == "about-musescore"
+        assert results[0].method_name == "openAboutDialog"
 
     def test_extracts_register_action(self):
-        """Extracts action code from registerAction() calls."""
+        """Extracts from registerAction("code", &Controller::method)."""
         code = b'''
-        void Foo::init() {
-            registerAction("set-tempo", [this]() { openSetTempoDialog(); });
-            registerAction("current-tempo", [this]() { announceCurrentTempo(); });
+        void Controller::init() {
+            registerAction("config-raster", &Controller::openEditGridSizeDialog);
         }
         '''
         parser = CppParser()
         tree = parser.parse(code)
-        results = extract_dispatcher_reg_codes(tree, code)
-        assert len(results) == 2
-        assert "set-tempo" in results
-        assert "current-tempo" in results
+        results = extract_registrations(tree, code, "src/notationscene/internal/controller.cpp")
+        assert len(results) == 1
+        assert results[0].action_code == "config-raster"
+        assert results[0].method_name == "openEditGridSizeDialog"
 
-
-class TestNormalization:
-    def test_strip_musescore_prefix(self):
-        """Strips musescore:// prefix from URI."""
-        assert normalize_uri("musescore://notation/settempo") == "settempo"
-
-    def test_strip_muse_prefix(self):
-        """Strips muse:// prefix from URI."""
-        assert normalize_uri("muse://preferences") == "preferences"
-
-    def test_strip_module_segment(self):
-        """Strips the module segment (first path component)."""
-        assert normalize_uri("musescore://playback/speeddialog") == "speeddialog"
-        assert normalize_uri("musescore://project/export") == "export"
-
-    def test_kebab_case_conversion(self):
-        """Converts camelCase to kebab-case."""
-        assert normalize_action_code("gotoMeasure") == "goto-measure"
-        assert normalize_action_code("setTempo") == "set-tempo"
-
-    def test_preserves_existing_kebab(self):
-        """Preserves existing kebab-case action codes."""
-        assert normalize_action_code("set-tempo") == "set-tempo"
-        assert normalize_action_code("play") == "play"
-
-    def test_fuzzy_match_removes_hyphens(self):
-        """Fuzzy matching removes hyphens for comparison."""
-        assert fuzzy_match("settempo", "set-tempo") is True
-        assert fuzzy_match("speeddialog", "speed-dialog") is True
-        assert fuzzy_match("play", "stop") is False
-
-    def test_action_code_with_protocol_prefix(self):
-        """Normalizes action codes with action:// prefix."""
-        assert normalize_action_code("action://notation/copy") == "copy"
+    def test_extracts_multiple_registrations(self):
+        """Extracts multiple registrations from one file."""
+        code = b'''
+        void Controller::init() {
+            dispatcher()->reg(this, "play", [this]() { togglePlay(); });
+            dispatcher()->reg(this, "stop", this, &Controller::stop);
+            registerAction("rewind", &Controller::rewind);
+        }
+        '''
+        parser = CppParser()
+        tree = parser.parse(code)
+        results = extract_registrations(tree, code, "src/playback/internal/controller.cpp")
+        assert len(results) == 3
+        codes = {r.action_code for r in results}
+        assert codes == {"play", "stop", "rewind"}
 
 
 class TestDerivation:
@@ -197,7 +259,7 @@ class TestDerivation:
         assert get_controller_class("playback") == "PlaybackController"
         assert get_controller_class("notationscene") == "NotationActionController"
         assert get_controller_class("appshell") == "ApplicationActionController"
-        assert get_controller_class("project") == "ProjectActionController"
+        assert get_controller_class("project") == "ProjectActionsController"
         assert get_controller_class("instrumentsscene") == "InstrumentsActionsController"
 
     def test_controller_class_unknown_module_returns_none(self):
@@ -206,21 +268,64 @@ class TestDerivation:
 
 
 class TestScanCommand:
-    def test_scan_finds_known_gaps(self):
-        """Scan against the real codebase finds known candidates."""
+    def test_scan_returns_candidates(self):
+        """Scan against the real codebase returns a list of candidates."""
         candidates = scan_codebase("src")
         assert isinstance(candidates, list)
         for c in candidates:
             assert hasattr(c, 'uri')
             assert hasattr(c, 'component')
             assert hasattr(c, 'source_file')
+            assert hasattr(c, 'reason')
             assert c.uri.startswith('musescore://') or c.uri.startswith('muse://')
 
-    def test_scan_excludes_already_registered(self):
-        """Scan does not include URIs that have matching UiActions."""
+    def test_scan_excludes_fully_wired_chains(self):
+        """Scan does NOT flag URIs with a complete handler chain.
+
+        These URIs have: interactive()->open("uri") in a method →
+        that method is registered via reg("code", &Controller::method) →
+        "code" has a UiAction declaration. They should NOT appear as gaps.
+        """
         candidates = scan_codebase("src")
-        candidate_uris = [c.uri for c in candidates]
-        assert "musescore://notation/settempo" not in candidate_uris
+        candidate_uris = {c.uri for c in candidates}
+
+        # about/musescore: reg("about-musescore", &ApplicationActionController::openAboutDialog)
+        # → openAboutDialog opens "musescore://about/musescore" → UiAction("about-musescore")
+        assert "musescore://about/musescore" not in candidate_uris, \
+            "about/musescore should NOT be a gap — it has a complete chain"
+
+        # about/musicxml: reg("about-musicxml", &ApplicationActionController::openAboutMusicXMLDialog)
+        # → opens "musescore://about/musicxml" → UiAction("about-musicxml")
+        assert "musescore://about/musicxml" not in candidate_uris, \
+            "about/musicxml should NOT be a gap — it has a complete chain"
+
+        # project/export: reg("file-export", &ProjectActionsController::exportScore)
+        # → exportScore opens "musescore://project/export" (via Uri variable) → UiAction("file-export")
+        # This tests Uri variable resolution: open(EXPORT_URI) where EXPORT_URI is
+        # declared as static const Uri EXPORT_URI("musescore://project/export")
+        assert "musescore://project/export" not in candidate_uris, \
+            "project/export should NOT be a gap — file-export action opens it"
+
+    def test_scan_includes_true_gaps(self):
+        """Scan DOES flag URIs with no complete handler chain."""
+        candidates = scan_codebase("src")
+        candidate_uris = {c.uri for c in candidates}
+        candidate_by_uri = {c.uri: c for c in candidates}
+
+        # Diagnostics dialogs have no handler at all — true gaps
+        diagnostics_found = [uri for uri in candidate_uris if "diagnostics" in uri]
+        assert len(diagnostics_found) > 0, \
+            "Diagnostics URIs should appear as gaps (no handler chain)"
+
+        # notation/editgridsize: registerAction("config-raster", &Controller::openEditGridSizeDialog)
+        # → opens "musescore://notation/editgridsize" → but config-raster has NO UiAction
+        # This is a TRUE gap: the handler exists and is registered, but the action code
+        # has no UiAction declaration, so the dialog can't be reached from the palette.
+        assert "musescore://notation/editgridsize" in candidate_uris, \
+            "notation/editgridsize SHOULD be a gap — config-raster has no UiAction"
+        editgrid = candidate_by_uri["musescore://notation/editgridsize"]
+        assert editgrid.reason == "no-uiaction", \
+            f"editgridsize reason should be 'no-uiaction', got '{editgrid.reason}'"
 
 
 class TestGenerateCommand:
@@ -235,6 +340,7 @@ class TestGenerateCommand:
             action_code="playback-speed",
             title="Playback speed",
             controller_class="PlaybackController",
+            reason="no-handler",
         )
         output = generate_code_blocks(candidate)
         assert "=== CANDIDATE:" in output
@@ -253,6 +359,7 @@ class TestGenerateCommand:
             action_code="playback-speed",
             title="Playback speed",
             controller_class="PlaybackController",
+            reason="no-handler",
         )
         output = generate_code_blocks(candidate)
         assert "playback-speed" in output
@@ -268,6 +375,7 @@ class TestGenerateCommand:
             action_code="playback-speed",
             title="Playback speed",
             controller_class="PlaybackController",
+            reason="no-handler",
         )
         output = generate_code_blocks(candidate)
         assert 'interactive()->open("musescore://playback/speeddialog")' in output
@@ -283,6 +391,7 @@ class TestGenerateCommand:
             action_code="unknown-something",
             title="Something",
             controller_class=None,
+            reason="no-handler",
         )
         output = generate_code_blocks(candidate)
         assert "WARNING" in output or "unknown" in output.lower()
@@ -301,6 +410,7 @@ class TestCliOutput:
                 action_code="playback-speed",
                 title="Playback speed",
                 controller_class="PlaybackController",
+                reason="no-handler",
             ),
         ]
         print_scan_results(candidates)
@@ -308,6 +418,7 @@ class TestCliOutput:
         assert "musescore://playback/speeddialog" in captured.out
         assert "PlaybackSpeedDialog" in captured.out
         assert "playback-speed" in captured.out
+        assert "no-handler" in captured.out
 
     def test_generate_output_for_known_uri(self):
         """Generate finds a candidate by URI and produces code blocks."""

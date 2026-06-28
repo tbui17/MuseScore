@@ -3,6 +3,11 @@
 
 Scans for registerQmlUri calls lacking UiAction registrations,
 and generates ready-to-paste code blocks to fill the gaps.
+
+Matching strategy: trace the actual handler chain instead of guessing by name.
+  URI -> (method that contains the URI string) -> (action code registered
+  to that method via reg()/registerAction()) -> (UiAction for that code).
+A URI is a "gap" if any link in this chain is missing.
 """
 
 import sys
@@ -12,6 +17,7 @@ import argparse
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
+from collections import defaultdict
 
 import tree_sitter_cpp
 from tree_sitter import Language, Parser
@@ -38,6 +44,22 @@ class RegisterQmlUriCall:
 
 
 @dataclass
+class OpenCall:
+    """An interactive()->open("uri") call or URI string literal found in a controller."""
+    uri: str
+    method_name: str  # enclosing method that contains the URI
+    source_file: str
+
+
+@dataclass
+class Registration:
+    """An action registration: reg("code", handler) or registerAction("code", handler)."""
+    action_code: str
+    method_name: str  # handler method name
+    source_file: str
+
+
+@dataclass
 class Candidate:
     """A URI registered via registerQmlUri that lacks a UiAction."""
     uri: str
@@ -48,6 +70,7 @@ class Candidate:
     action_code: str = ""
     title: str = ""
     controller_class: Optional[str] = None
+    reason: str = ""  # "no-handler", "handler-not-registered", "no-uiaction"
 
 
 # Controller class lookup table (from the design spec)
@@ -55,7 +78,7 @@ CONTROLLER_CLASS_MAP = {
     "playback": "PlaybackController",
     "notationscene": "NotationActionController",
     "appshell": "ApplicationActionController",
-    "project": "ProjectActionController",
+    "project": "ProjectActionsController",
     "notation": "NotationActionController",
     "instrumentsscene": "InstrumentsActionsController",
 }
@@ -65,31 +88,21 @@ def _extract_string_literal(node, source: bytes) -> Optional[str]:
     """Extract the value of a string literal node."""
     if node is None or node.type != 'string_literal':
         return None
-    # tree-sitter returns the raw bytes including quotes
     raw = source[node.start_byte:node.end_byte].decode('utf-8')
-    # Strip surrounding quotes (handle both "..." and "..." forms)
     if raw.startswith('"') and raw.endswith('"'):
         return raw[1:-1]
     return raw
 
 
 def _find_calls_by_name(root_node, source: bytes, method_name: str):
-    """Find all method calls matching the given name."""
+    """Find all method calls matching the given name (anchored to the trailing token)."""
     calls = []
-    cursor = root_node.walk()
 
     def traverse(node):
         if node.type == 'call_expression':
-            # Get the function node
             func_node = node.child_by_field_name('function')
             if func_node is not None:
-                # For method calls like ir->registerQmlUri(...), the function
-                # is a field_expression or identifier
                 func_text = source[func_node.start_byte:func_node.end_byte].decode('utf-8')
-                # Match the method name as the trailing token after ->, ::, or .,
-                # or as the whole function text. A bare substring match would let
-                # 'reg' match 'registerAction', so anchor to the end of the text.
-                # E.g. 'ir->registerQmlUri', 'dispatcher()->reg', 'UiAction', 'registerAction'.
                 if re.search(re.escape(method_name) + r'$', func_text):
                     calls.append(node)
         for child in node.children:
@@ -97,12 +110,10 @@ def _find_calls_by_name(root_node, source: bytes, method_name: str):
 
     traverse(root_node)
     return calls
-def _find_first_string_literal(node) -> Optional[object]:
-    """Recursively find the first string_literal node within a node's subtree.
 
-    tree-sitter may wrap arguments in intermediate nodes (e.g. parameter_pack_expansion
-    when '...' appears), so a direct child lookup can miss string literals.
-    """
+
+def _find_first_string_literal(node) -> Optional[object]:
+    """Recursively find the first string_literal node within a node's subtree."""
     if node is None:
         return None
     if node.type == 'string_literal':
@@ -114,11 +125,90 @@ def _find_first_string_literal(node) -> Optional[object]:
     return None
 
 
-def extract_register_qml_uri_calls(tree, source: bytes, source_file: str) -> list[RegisterQmlUriCall]:
-    """Extract all registerQmlUri calls from a parsed C++ file.
+def _extract_function_name(func_def_node, source: bytes) -> Optional[str]:
+    """Extract the method name from a function_definition node."""
+    declarator = func_def_node.child_by_field_name('declarator')
+    if declarator is None:
+        return None
+    name_node = declarator
+    while name_node is not None:
+        if name_node.type in ('identifier', 'qualified_identifier'):
+            break
+        child = name_node.child_by_field_name('declarator')
+        if child is None:
+            break
+        name_node = child
+    if name_node is None or name_node.type not in ('identifier', 'qualified_identifier'):
+        name_node = declarator
+    name_text = source[name_node.start_byte:name_node.end_byte].decode('utf-8')
+    if '::' in name_text:
+        name_text = name_text.rsplit('::', 1)[-1]
+    name_text = name_text.split('(')[0].strip()
+    return name_text if name_text else None
 
-    Looks for calls matching: ir->registerQmlUri(Uri("..."), "...", "...")
+
+def _find_enclosing_method_name(node, source: bytes) -> Optional[str]:
+    """Walk up parents to find the enclosing function_definition and return its name."""
+    current = node.parent
+    while current is not None:
+        if current.type == 'function_definition':
+            return _extract_function_name(current, source)
+        current = current.parent
+    return None
+
+
+def _resolve_uri_variable(source: bytes, var_name: str) -> Optional[str]:
+    """Find a Uri variable declaration and extract its URI string.
+
+    Handles patterns like:
+      static const Uri VAR_NAME("musescore://...")
+      Uri VAR_NAME("musescore://...")
+      VAR_NAME = Uri("musescore://...")
     """
+    # Pattern: Uri VAR_NAME( "uri" ) -- only whitespace between ( and the string
+    pattern = rf'Uri\s+{re.escape(var_name)}\s*\(\s*"([^"]+)"'.encode()
+    match = re.search(pattern, source)
+    if match:
+        return match.group(1).decode('utf-8')
+    # Pattern: VAR_NAME = Uri("uri")
+    pattern2 = rf'{re.escape(var_name)}\s*=\s*Uri\s*\(\s*"([^"]+)"'.encode()
+    match2 = re.search(pattern2, source)
+    if match2:
+        return match2.group(1).decode('utf-8')
+    return None
+
+
+def _extract_handler_method_name(handler_text: str) -> Optional[str]:
+    """Extract method name from a handler argument's raw text.
+
+    Handles:
+      [this]() { methodName(); }         -- lambda with method call
+      [this]() { this->methodName(); }    -- lambda with this-> call
+      &Controller::methodName             -- function pointer
+      &methodName                         -- simple function pointer
+    """
+    if '{' in handler_text:
+        body = handler_text[handler_text.index('{'):]
+        keywords = {'if', 'for', 'while', 'switch', 'return', 'else', 'catch', 'sizeof'}
+        for match in re.finditer(r'(?:->|::)?(\w+)\s*\(', body):
+            name = match.group(1)
+            if name not in keywords:
+                return name
+        return None
+    if '::' in handler_text:
+        parts = handler_text.rsplit('::', 1)
+        last = parts[-1].strip()
+        match = re.match(r'(\w+)', last)
+        if match:
+            return match.group(1)
+    match = re.match(r'&?\s*(\w+)', handler_text.strip())
+    if match:
+        return match.group(1)
+    return None
+
+
+def extract_register_qml_uri_calls(tree, source: bytes, source_file: str) -> list[RegisterQmlUriCall]:
+    """Extract all registerQmlUri calls from a parsed C++ file."""
     results = []
     calls = _find_calls_by_name(tree.root_node, source, 'registerQmlUri')
 
@@ -127,22 +217,18 @@ def extract_register_qml_uri_calls(tree, source: bytes, source_file: str) -> lis
         if args is None:
             continue
 
-        # The first argument is Uri("...") — a call_expression containing a string_literal
-        # We need to find the string literal inside it
         uri = None
         qml_module = None
         component = None
 
         arg_nodes = [child for child in args.children if child.type in ('call_expression', 'string_literal', 'identifier')]
 
-        # Find Uri("...") call - first argument
         for arg in arg_nodes:
             if arg.type == 'call_expression':
                 func = arg.child_by_field_name('function')
                 if func is not None:
                     func_text = source[func.start_byte:func.end_byte].decode('utf-8')
                     if 'Uri' in func_text:
-                        # Find the string literal argument inside Uri(...)
                         inner_args = arg.child_by_field_name('arguments')
                         if inner_args:
                             for inner_child in inner_args.children:
@@ -151,20 +237,16 @@ def extract_register_qml_uri_calls(tree, source: bytes, source_file: str) -> lis
                                     break
                 break
 
-        # Find the remaining string_literal arguments
         string_args = []
         for arg in arg_nodes:
             if arg.type == 'string_literal':
                 string_args.append(_extract_string_literal(arg, source))
 
-        # If we didn't find URI via the Uri() call, try string_args directly
         if uri is None and len(string_args) >= 1:
-            # Check if first string arg looks like a URI
             if string_args[0] and '://' in string_args[0]:
                 uri = string_args[0]
                 string_args = string_args[1:]
 
-        # Assign remaining string args to module and component
         if uri is not None:
             non_uri_strings = [s for s in string_args if s and '://' not in s]
             if len(non_uri_strings) >= 2:
@@ -185,11 +267,7 @@ def extract_register_qml_uri_calls(tree, source: bytes, source_file: str) -> lis
 
 
 def extract_ui_action_codes(tree, source: bytes) -> list[str]:
-    """Extract all UiAction action codes from a parsed C++ file.
-
-    Looks for calls matching: UiAction("action-code", ...)
-    Returns the raw action code string (first argument).
-    """
+    """Extract all UiAction action codes from a parsed C++ file."""
     results = []
     calls = _find_calls_by_name(tree.root_node, source, 'UiAction')
 
@@ -197,10 +275,6 @@ def extract_ui_action_codes(tree, source: bytes) -> list[str]:
         args = call_node.child_by_field_name('arguments')
         if args is None:
             continue
-
-        # First argument is a string literal. It may be nested inside an
-        # intermediate node (e.g. parameter_pack_expansion when '...' is used),
-        # so search recursively for the first string literal.
         str_node = _find_first_string_literal(args)
         if str_node is not None:
             code = _extract_string_literal(str_node, source)
@@ -210,13 +284,90 @@ def extract_ui_action_codes(tree, source: bytes) -> list[str]:
     return results
 
 
-def extract_dispatcher_reg_codes(tree, source: bytes) -> list[str]:
-    """Extract all action codes from dispatcher()->reg() and registerAction() calls.
+def extract_open_calls(tree, source: bytes, source_file: str) -> list[OpenCall]:
+    """Extract all interactive()->open("uri") calls from a parsed C++ file.
 
-    Looks for calls matching:
-      dispatcher()->reg(this, "action-code", ...)
-      registerAction("action-code", ...)
-    Returns the action code string (the string literal argument).
+    Handles three argument patterns:
+      1. interactive()->open("musescore://...")          -- string literal
+      2. interactive()->open(Uri("musescore://..."))      -- Uri() call
+      3. interactive()->open(EXPORT_URI)                  -- Uri variable (resolved)
+    """
+    results = []
+    calls = _find_calls_by_name(tree.root_node, source, 'open')
+
+    for call_node in calls:
+        func_node = call_node.child_by_field_name('function')
+        if func_node is None:
+            continue
+        func_text = source[func_node.start_byte:func_node.end_byte].decode('utf-8')
+        if 'interactive' not in func_text:
+            continue
+
+        args = call_node.child_by_field_name('arguments')
+        if args is None:
+            continue
+
+        uri = None
+
+        # Case 1 & 2: string literal or Uri("...") call
+        str_node = _find_first_string_literal(args)
+        if str_node is not None:
+            uri = _extract_string_literal(str_node, source)
+
+        # Case 3: identifier (Uri variable) -- resolve via file-wide search
+        if uri is None:
+            for child in args.children:
+                if child.type == 'identifier':
+                    var_name = source[child.start_byte:child.end_byte].decode('utf-8')
+                    uri = _resolve_uri_variable(source, var_name)
+                    if uri:
+                        break
+
+        if not uri:
+            continue
+
+        method_name = _find_enclosing_method_name(call_node, source) or ""
+        results.append(OpenCall(uri=uri, method_name=method_name, source_file=source_file))
+
+    return results
+
+
+def extract_uri_literals_in_methods(tree, source: bytes, source_file: str) -> list[OpenCall]:
+    """Find URI string literals in any method and map them to the enclosing method.
+
+    This is a broad search that catches cases where the URI is assigned to a
+    variable, passed through UriQuery, or constructed in if/else branches before
+    being opened. It complements extract_open_calls() which only traces direct
+    interactive()->open() calls.
+
+    Only searches for strings starting with 'musescore://' or 'muse://' to avoid
+    false positives from non-URI strings.
+    """
+    results = []
+
+    def traverse(node):
+        if node.type == 'string_literal':
+            text = _extract_string_literal(node, source)
+            if text and (text.startswith('musescore://') or text.startswith('muse://')):
+                method_name = _find_enclosing_method_name(node, source)
+                if method_name:
+                    results.append(OpenCall(uri=text, method_name=method_name, source_file=source_file))
+        for child in node.children:
+            traverse(child)
+
+    traverse(tree.root_node)
+    return results
+
+
+def extract_registrations(tree, source: bytes, source_file: str) -> list[Registration]:
+    """Extract action registrations from dispatcher()->reg() and registerAction() calls.
+
+    Returns (action_code, handler_method_name) pairs.
+    Handles:
+      dispatcher()->reg(this, "code", [this]() { methodName(); })
+      dispatcher()->reg(this, "code", this, &Controller::methodName)
+      registerAction("code", [this]() { methodName(); })
+      registerAction("code", &Controller::methodName)
     """
     results = []
     calls = _find_calls_by_name(tree.root_node, source, 'reg')
@@ -227,92 +378,39 @@ def extract_dispatcher_reg_codes(tree, source: bytes) -> list[str]:
         if args is None:
             continue
 
-        # Find the first string literal argument — that's the action code.
-        # For dispatcher()->reg(this, "code", ...), the string is the 2nd arg;
-        # for registerAction("code", ...), the string is the 1st arg.
-        # Search recursively since the literal may be nested.
         str_node = _find_first_string_literal(args)
-        if str_node is not None:
-            code = _extract_string_literal(str_node, source)
-            if code:
-                results.append(code)
+        if str_node is None:
+            continue
+        action_code = _extract_string_literal(str_node, source)
+        if not action_code:
+            continue
+
+        method_name = None
+        for child in args.children:
+            if child.type == 'string_literal':
+                continue
+            text = source[child.start_byte:child.end_byte].decode('utf-8').strip()
+            if text == 'this' or text == '':
+                continue
+            method_name = _extract_handler_method_name(text)
+            if method_name:
+                break
+
+        results.append(Registration(
+            action_code=action_code,
+            method_name=method_name or "",
+            source_file=source_file
+        ))
 
     return results
-
-
-def normalize_uri(uri: str) -> str:
-    """Normalize a URI to a comparable form.
-
-    1. Strip musescore:// or muse:// prefix
-    2. Strip the module segment (first path component)
-    3. Return the remaining segment(s) as-is (lowercase)
-    """
-    # Strip protocol prefix
-    for prefix in ('musescore://', 'muse://'):
-        if uri.startswith(prefix):
-            uri = uri[len(prefix):]
-            break
-
-    # Strip module segment (first path component)
-    if '/' in uri:
-        parts = uri.split('/', 1)
-        if len(parts) > 1:
-            uri = parts[1]
-        else:
-            uri = parts[0]
-
-    return uri.lower()
-
-
-def normalize_action_code(code: str) -> str:
-    """Normalize an action code to a comparable form.
-
-    1. Strip action:// prefix and module segment if present
-    2. Convert camelCase to kebab-case
-    3. Return lowercase
-    """
-    # Strip action:// prefix
-    if code.startswith('action://'):
-        code = code[len('action://'):]
-        # Strip module segment
-        if '/' in code:
-            parts = code.split('/', 1)
-            if len(parts) > 1:
-                code = parts[1]
-            else:
-                code = parts[0]
-
-    # Convert camelCase to kebab-case
-    # Insert hyphen before uppercase letters, then lowercase
-    result = re.sub(r'([A-Z])', r'-\1', code)
-    # Remove leading hyphen if any
-    if result.startswith('-'):
-        result = result[1:]
-
-    return result.lower()
-
-
-def fuzzy_match(normalized_uri: str, normalized_code: str) -> bool:
-    """Check if a normalized URI and action code match.
-
-    First tries exact match, then tries fuzzy match by removing hyphens.
-    """
-    if normalized_uri == normalized_code:
-        return True
-
-    # Fuzzy: remove all hyphens and compare
-    uri_no_hyphens = normalized_uri.replace('-', '')
-    code_no_hyphens = normalized_code.replace('-', '')
-    return uri_no_hyphens == code_no_hyphens
 
 
 def derive_action_code(uri: str) -> str:
     """Derive an action code from a URI.
 
-    Takes the last segment, converts to kebab-case, prepends the module segment.
-    Example: musescore://playback/speeddialog → playback-speed
+    Takes the last segment, strips trailing 'dialog', converts to kebab-case,
+    prepends the module segment.
     """
-    # Strip protocol
     for prefix in ('musescore://', 'muse://'):
         if uri.startswith(prefix):
             uri = uri[len(prefix):]
@@ -322,15 +420,15 @@ def derive_action_code(uri: str) -> str:
     if len(parts) >= 2:
         module = parts[0]
         last_segment = parts[-1]
-        # Strip a trailing 'dialog' so the derived code matches the component's
-        # action name (e.g. speeddialog -> speed, giving 'playback-speed').
         if last_segment.lower().endswith('dialog'):
-            last_segment = last_segment[:-len('dialog')]
-        # Convert last segment to kebab-case (insert hyphen before capitals)
+            last_segment = last_segment[:-6]
         kebab = re.sub(r'([A-Z])', r'-\1', last_segment).lstrip('-').lower()
-        return f"{module}-{kebab}"
+        return f"{module}-{kebab}" if kebab else module.lower()
     elif len(parts) == 1:
-        return re.sub(r'([A-Z])', r'-\1', parts[0]).lstrip('-').lower()
+        seg = parts[0]
+        if seg.lower().endswith('dialog'):
+            seg = seg[:-6]
+        return re.sub(r'([A-Z])', r'-\1', seg).lstrip('-').lower()
     return uri.lower()
 
 
@@ -338,16 +436,11 @@ def derive_title(component: str) -> str:
     """Derive a user-facing title from a component name.
 
     Strips 'Dialog' suffix, converts camelCase to space-separated title case.
-    Example: PlaybackSpeedDialog → "Playback speed"
     """
-    # Strip 'Dialog' suffix
     name = component
     if name.endswith('Dialog'):
         name = name[:-6]
-
-    # Convert camelCase to spaces
     spaced = re.sub(r'([A-Z])', r' \1', name).strip()
-    # Lowercase everything except first word
     words = spaced.split(' ')
     if words:
         words = [words[0].capitalize()] + [w.lower() for w in words[1:]]
@@ -355,12 +448,7 @@ def derive_title(component: str) -> str:
 
 
 def derive_module(source_file: str) -> str:
-    """Derive module name from the source file path.
-
-    Extracts the directory name under src/.
-    Example: src/playback/playbackmodule.cpp → playback
-    """
-    # Normalize path separators
+    """Derive module name from the source file path."""
     normalized = source_file.replace('\\', '/')
     parts = normalized.split('/')
     if 'src' in parts:
@@ -371,10 +459,7 @@ def derive_module(source_file: str) -> str:
 
 
 def get_controller_class(module: str) -> Optional[str]:
-    """Look up the controller class name for a module.
-
-    Returns None if the module is not in the lookup table.
-    """
+    """Look up the controller class name for a module."""
     return CONTROLLER_CLASS_MAP.get(module)
 
 
@@ -386,11 +471,14 @@ def _find_files_by_pattern(root: str, pattern: str) -> list[str]:
 def scan_codebase(src_dir: str) -> list[Candidate]:
     """Scan the codebase for registerQmlUri calls lacking UiAction registrations.
 
-    1. Find all *module.cpp files, extract registerQmlUri calls
-    2. Find all *uiactions.cpp files, extract UiAction codes
-    3. Find all *controller.cpp and *actioncontroller.cpp files, extract dispatcher codes
-    4. Normalize and compute set difference
-    5. Derive metadata for each candidate
+    Uses handler-chain tracing instead of name matching:
+    1. Collect all registerQmlUri calls (URIs to check)
+    2. Collect all UiAction codes (palette-visible actions)
+    3. Collect all URI string literals from ALL .cpp files -> URI -> method names
+       (broad search catches URIs in scenarios, models, and dynamic constructions)
+    4. Collect all reg()/registerAction() calls from controller files -> method -> action codes
+    5. For each URI, trace: URI -> method -> action code -> UiAction
+       If the full chain exists, the URI is NOT a gap.
     """
     parser = CppParser()
 
@@ -404,63 +492,94 @@ def scan_codebase(src_dir: str) -> list[Candidate]:
         all_qml_uris.extend(calls)
 
     # Step 2: Collect all UiAction codes
-    all_action_codes: set[str] = set()
+    uiaction_codes: set[str] = set()
     uiaction_files = _find_files_by_pattern(src_dir, "*uiactions.cpp")
     for file_path in uiaction_files:
         source = Path(file_path).read_bytes()
         tree = parser.parse(source)
         codes = extract_ui_action_codes(tree, source)
-        all_action_codes.update(codes)
+        uiaction_codes.update(codes)
 
-    # Step 3: Collect all dispatcher->reg / registerAction codes
-    controller_patterns = ["*controller.cpp", "*actioncontroller.cpp"]
+    # Step 3: Collect URI -> method mappings from ALL .cpp files (broad search)
+    # This catches URIs in scenario files, model files, and dynamic constructions
+    uri_to_methods: dict[str, set[str]] = defaultdict(set)
+    all_cpp_files = _find_files_by_pattern(src_dir, "*.cpp")
+    for file_path in all_cpp_files:
+        lower_path = file_path.lower()
+        if 'test' in lower_path or 'mock' in lower_path or 'qrc_' in lower_path:
+            continue
+        source = Path(file_path).read_bytes()
+        tree = parser.parse(source)
+
+        # URI string literals in any method -> URI -> methods
+        for oc in extract_uri_literals_in_methods(tree, source, file_path):
+            clean_uri = oc.uri.split('?')[0]  # strip query params
+            uri_to_methods[clean_uri].add(oc.method_name)
+
+        # Direct open calls for precise Uri variable resolution
+        for oc in extract_open_calls(tree, source, file_path):
+            clean_uri = oc.uri.split('?')[0]
+            uri_to_methods[clean_uri].add(oc.method_name)
+
+    # Step 4: Collect method -> action_code mappings from controller files only
+    method_to_codes: dict[str, set[str]] = defaultdict(set)
+    controller_patterns = ["*controller.cpp", "*actioncontroller.cpp", "*actionscontroller.cpp"]
+    seen_files = set()
     for pattern in controller_patterns:
         for file_path in _find_files_by_pattern(src_dir, pattern):
+            if file_path in seen_files:
+                continue
+            seen_files.add(file_path)
             source = Path(file_path).read_bytes()
             tree = parser.parse(source)
-            codes = extract_dispatcher_reg_codes(tree, source)
-            all_action_codes.update(codes)
+            for reg in extract_registrations(tree, source, file_path):
+                if reg.method_name:
+                    method_to_codes[reg.method_name].add(reg.action_code)
 
-    # Step 4: Normalize and compute set difference
-    normalized_action_codes = {normalize_action_code(c) for c in all_action_codes}
-
+    # Step 5: Trace the chain for each URI
     candidates: list[Candidate] = []
     for qml_call in all_qml_uris:
-        norm_uri = normalize_uri(qml_call.uri)
-        # Check if any action code matches (exact or fuzzy)
-        is_registered = any(
-            fuzzy_match(norm_uri, norm_code)
-            for norm_code in normalized_action_codes
-        )
-        if not is_registered:
-            module = derive_module(qml_call.source_file)
-            candidates.append(Candidate(
-                uri=qml_call.uri,
-                qml_module=qml_call.qml_module,
-                component=qml_call.component,
-                source_file=qml_call.source_file,
-                module=module,
-                action_code=derive_action_code(qml_call.uri),
-                title=derive_title(qml_call.component),
-                controller_class=get_controller_class(module),
-            ))
+        methods = uri_to_methods.get(qml_call.uri, set())
+        action_codes: set[str] = set()
+        for method in methods:
+            action_codes.update(method_to_codes.get(method, set()))
+
+        has_uiaction = any(code in uiaction_codes for code in action_codes)
+
+        if has_uiaction:
+            continue
+
+        # Determine the reason for the gap
+        if not methods:
+            reason = "no-handler"
+        elif not action_codes:
+            reason = "handler-not-registered"
+        else:
+            reason = "no-uiaction"
+
+        module = derive_module(qml_call.source_file)
+        candidates.append(Candidate(
+            uri=qml_call.uri,
+            qml_module=qml_call.qml_module,
+            component=qml_call.component,
+            source_file=qml_call.source_file,
+            module=module,
+            action_code=derive_action_code(qml_call.uri),
+            title=derive_title(qml_call.component),
+            controller_class=get_controller_class(module),
+            reason=reason,
+        ))
 
     return candidates
 
 
 def generate_code_blocks(candidate: Candidate) -> str:
-    """Generate ready-to-paste code blocks for a candidate.
-
-    Produces:
-    - Block 1: UiAction declaration (for *uiactions.cpp)
-    - Block 2: dispatcher()->reg() handler + method (for *controller.cpp + .h)
-    - Block 3: registerQmlUri (only if the URI isn't already registered — usually it is)
-    """
+    """Generate ready-to-paste code blocks for a candidate."""
     lines = []
     lines.append(f"=== CANDIDATE: {candidate.uri} ===")
+    lines.append(f"Gap reason: {candidate.reason}")
     lines.append("")
 
-    # Derive target file paths
     module = candidate.module
     uiactions_file = f"src/{module}/internal/{module}uiactions.cpp"
     controller_file = f"src/{module}/internal/{module.replace('scene', '')}controller.cpp"
@@ -483,7 +602,7 @@ def generate_code_blocks(candidate: Candidate) -> str:
     if candidate.controller_class is None:
         lines.append("--- Block 2: Handler registration + method ---")
         lines.append("WARNING: No controller class found for this module.")
-        lines.append(f"The agent must manually determine the controller class and target files.")
+        lines.append("The agent must manually determine the controller class and target files.")
         lines.append("")
     else:
         handler_method = f"open{candidate.component.replace('Dialog', '')}Dialog"
@@ -493,7 +612,7 @@ def generate_code_blocks(candidate: Candidate) -> str:
         lines.append(f"Insert .h: after the last private method declaration")
         lines.append("")
         lines.append(f'// .cpp, in init():')
-        lines.append(f'    dispatcher()->reg(this, "{candidate.action_code}", [this]() {{ {handler_method}(); }});')
+        lines.append(f'    dispatcher()->reg(this, "{candidate.action_code}", this, &{candidate.controller_class}::{handler_method});')
         lines.append("")
         lines.append(f'// .cpp, method definition:')
         lines.append(f'void {candidate.controller_class}::{handler_method}()')
@@ -508,15 +627,15 @@ def generate_code_blocks(candidate: Candidate) -> str:
     # Block 3: registerQmlUri (usually already present)
     lines.append("--- Block 3: registerQmlUri ---")
     lines.append(f"Already present in {module_file}")
-    lines.append(f"(If not, add: ir->registerQmlUri(Uri(\"{candidate.uri}\"), \"{candidate.qml_module}\", \"{candidate.component}\"));")
+    lines.append(f'(If not, add: ir->registerQmlUri(Uri("{candidate.uri}"), "{candidate.qml_module}", "{candidate.component}"));')
 
     return '\n'.join(lines)
 
 
 def print_scan_results(candidates: list[Candidate]):
-    """Print scan results in a readable table format."""
+    """Print scan results in a readable format."""
     if not candidates:
-        print("No candidates found — all registerQmlUri calls have matching UiAction registrations.")
+        print("No candidates found -- all registerQmlUri calls have matching UiAction registrations.")
         return
 
     print(f"Found {len(candidates)} candidate(s):\n")
@@ -527,6 +646,7 @@ def print_scan_results(candidates: list[Candidate]):
         print(f"  Derived code:  {c.action_code}")
         print(f"  Derived title: \"{c.title}\"")
         print(f"  Controller:    {c.controller_class or 'UNKNOWN'}")
+        print(f"  Gap reason:    {c.reason}")
         print(f"  File:          {c.source_file}")
         print()
 
