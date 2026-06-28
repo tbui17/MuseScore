@@ -66,6 +66,13 @@ jobs:
       - name: Run testflow GUI test
         shell: pwsh
         timeout-minutes: 10
+        env:
+          # Force software rendering — the GraphicsApiProvider probe
+          # creates a test QQuickWindow and waits for it to paint.
+          # On CI runners without a real GPU, this never completes
+          # and blocks the event loop before startupScenario runs.
+          # Software backend skips the probe entirely.
+          QT_QUICK_BACKEND: 'software'
         run: |
           $exe = Join-Path $PWD "build.debug\MuseScoreStudio5.exe"
           $script = Join-Path $PWD "share\testflowscripts\TC11_CommandPaletteDialog.js"
