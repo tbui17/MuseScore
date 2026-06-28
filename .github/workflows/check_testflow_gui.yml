@@ -81,7 +81,7 @@ jobs:
           SET "JACK_DIR=C:\Program Files (x86)\Jack"
           SET "PATH=%JACK_DIR%;%PATH%"
           SET "CCACHE_DIR=%USERPROFILE%\AppData\Local\ccache"
-          ninja_build.bat -t relwithdebinfo-target -T MuseScoreStudio5.exe
+          ninja_build.bat -t relwithdebinfo-target --build-target MuseScoreStudio5.exe
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
