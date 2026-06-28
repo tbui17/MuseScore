@@ -321,11 +321,11 @@ function Invoke-Publish {
     # Step 3: Create GitHub release
     $date = Get-Date -Format "yyyy-MM-dd"
     $tag = "braille-test-$date"
-    $zipPattern = Join-Path $RepoRoot "dist\musescore-braille-installer\MuseScore-Braille-Installer-*.zip"
-    $zipFile = Get-ChildItem -LiteralPath $zipPattern | Select-Object -First 1
+    $zipDir = Join-Path $RepoRoot "dist\musescore-braille-installer"
+    $zipFile = Get-ChildItem -Path $zipDir -Filter "MuseScore-Braille-Installer-$date.zip" | Select-Object -First 1
 
     if (-not $zipFile) {
-        throw "No ZIP found matching $zipPattern"
+        throw "No ZIP found in $zipDir matching MuseScore-Braille-Installer-$date.zip"
     }
 
     Write-Host "Step 3: Creating GitHub release $tag"
