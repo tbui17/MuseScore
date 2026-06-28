@@ -51,10 +51,6 @@ jobs:
       - name: Build (RelWithDebInfo)
         shell: cmd
         env:
-          # The muse_deps repo restructured its layout; the old
-          # MuseDeps.cmake populate() downloads .cmake files from URLs
-          # that now return 404. Disable the two affected modules —
-          # the testflow GUI test needs neither audio export nor ASIO.
           MUSE_MODULE_AUDIO_EXPORT: 'OFF'
           MUSE_MODULE_AUDIO_ASIO: 'OFF'
         run: |
@@ -63,11 +59,26 @@ jobs:
           SET "PATH=%JACK_DIR%;%PATH%"
           ninja_build.bat -t relwithdebinfo
 
+      - name: Pre-seed MuseScore settings
+        shell: pwsh
+        run: |
+          # Skip the FirstLaunchSetupDialog on CI — it intercepts keyboard
+          # focus and blocks the testflow script. The setting key is
+          # mu.appshell/application/hasCompletedFirstLaunchSetup.
+          $settingsDir = "$env:LOCALAPPDATA\MuseScore\MuseScoreStudio5Development"
+          New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
+          $iniPath = "$settingsDir\MuseScoreStudio5.ini"
+          $content = @"
+[mu.appshell]
+application/hasCompletedFirstLaunchSetup=true
+"@
+          Set-Content -Path $iniPath -Value $content -Encoding UTF8
+          Write-Host "Wrote settings to $iniPath"
+
       - name: Run testflow GUI test
         shell: pwsh
         timeout-minutes: 10
         env:
-          # Force software rendering to avoid GPU probe hang
           QT_QUICK_BACKEND: 'software'
         run: |
           $exe = Join-Path $PWD "build.release\MuseScoreStudio5.exe"
