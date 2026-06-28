@@ -25,6 +25,7 @@ if ($Jobs -lt 1) {
     $Jobs = 4
 }
 $ShowHelp = $false
+$BuildTarget = $null
 
 function Get-EnvDefault {
     param(
@@ -69,6 +70,9 @@ Usage: ninja_build.ps1
         installdebug, clean, compile_commands, revision
     -j, --jobs <number> [default: $Jobs]
         Number of parallel compilation jobs
+        --build-target <string>
+        Build a specific Ninja target instead of 'all' (e.g. MuseScoreStudio5.exe)
+        Useful for fast iteration when you only need the executable.
     -h, --help
         Show this help
 
@@ -136,6 +140,13 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     elseif ($arg -eq "-h" -or $arg -eq "--help") {
         $ShowHelp = $true
     }
+    elseif ($arg -eq "--build-target") {
+        if ($i + 1 -ge $args.Count) {
+            throw "Missing value for $arg"
+    }
+        $i++
+        $BuildTarget = $args[$i]
+    }
     else {
         throw "Unknown parameter passed: $arg"
     }
@@ -169,6 +180,23 @@ $MuseScoreBuildPipewireAudioDriver = Get-EnvDefault "MUSESCORE_BUILD_PIPEWIRE_AU
 $MuseScoreCompileUseUnity = Get-EnvDefault "MUSESCORE_COMPILE_USE_UNITY" "ON"
 $MuseScoreModuleAudioExport = Get-EnvDefault "MUSE_MODULE_AUDIO_EXPORT" "ON"
 $MuseScoreModuleAudioAsio = Get-EnvDefault "MUSE_MODULE_AUDIO_ASIO" "ON"
+
+# --- Build acceleration (ccache + debug info format) ---
+# ccache natively supports MSVC cl.exe since ccache 4.6 (2022).
+# Install: winget install ccache
+# Enable: set MUSESCORE_USE_CCACHE=ON (default: ON if ccache is on PATH)
+$MuseScoreUseCcache = Get-EnvDefault "MUSESCORE_USE_CCACHE" "ON"
+$ccachePath = (Get-Command ccache -ErrorAction SilentlyContinue)
+if ($MuseScoreUseCcache -eq "ON" -and $ccachePath) {
+    $MuseScoreUseCcache = "ON"
+} else {
+    $MuseScoreUseCcache = "OFF"
+}
+
+# /Z7 embeds debug info in each .obj — fully parallelizable, no PDB lock
+# contention, and ccache-compatible. /Zi (default) uses shared .pdb which
+# causes contention under parallel builds and ccache marks it "too hard".
+$MuseScoreMsvcDebugFormat = Get-EnvDefault "MUSESCORE_MSVC_DEBUG_FORMAT" "Embedded"
 
 function Get-ConfigureArgs {
     param(
@@ -210,8 +238,16 @@ function Get-ConfigureArgs {
         "-DCMAKE_SKIP_RPATH=$MuseScoreNoRpath",
         "-DMUSE_COMPILE_USE_UNITY=$MuseScoreCompileUseUnity",
         "-DMUSE_MODULE_AUDIO_EXPORT=$MuseScoreModuleAudioExport",
-        "-DMUSE_MODULE_AUDIO_ASIO=$MuseScoreModuleAudioAsio"
+        "-DMUSE_MODULE_AUDIO_ASIO=$MuseScoreModuleAudioAsio",
+        "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$MuseScoreMsvcDebugFormat"
     ) + $AdditionalArgs
+
+    if ($MuseScoreUseCcache -eq "ON") {
+        $args += @(
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache"
+        )
+    }
 
     if ($CMakeMakeProgramOverride) {
         $args += "-DCMAKE_MAKE_PROGRAM=$CMakeMakeProgramOverride"
@@ -231,7 +267,11 @@ function Start-Build {
 
     New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
     Invoke-CheckedCommand -FilePath "cmake" -Arguments (Get-ConfigureArgs -BuildType $BuildType -BuildDir $BuildDir) -WorkingDirectory $RepoRoot
-    Invoke-CheckedCommand -FilePath "cmake" -Arguments @("--build", $BuildDir, "--parallel", "$Jobs") -WorkingDirectory $RepoRoot
+    $buildArgs = @("--build", $BuildDir, "--parallel", "$Jobs")
+    if ($BuildTarget) {
+        $buildArgs += @("--target", $BuildTarget)
+    }
+    Invoke-CheckedCommand -FilePath "cmake" -Arguments $buildArgs -WorkingDirectory $RepoRoot
 }
 
 function Start-InstallBuild {
@@ -247,7 +287,14 @@ function Start-InstallBuild {
     Invoke-CheckedCommand -FilePath "cmake" -Arguments @("--install", $BuildDir, "--config", $BuildType) -WorkingDirectory $RepoRoot
 }
 
-$BuildTargets = @('release','debug','relwithdebinfo','install','installrelwithdebinfo','installdebug','compile_commands')
+if ($MuseScoreUseCcache -eq "ON") {
+    Write-Host "ccache enabled (CMAKE_CXX_COMPILER_LAUNCHER=ccache)"
+}
+if ($BuildTarget) {
+    Write-Host "Building target: $BuildTarget"
+}
+
+$BuildTargets = @('release','debug','relwithdebinfo','install','installrelwithdebinfo','installdebug','compile_commands','relwithdebinfo-target','debug-target')
 
 $Target = $Target.ToLowerInvariant()
 
@@ -305,6 +352,18 @@ switch ($Target) {
     }
     "relwithdebinfo" {
         Start-Build -BuildType "RelWithDebInfo" -BuildDir (Join-Path $RepoRoot "build.release")
+    }
+    "relwithdebinfo-target" {
+        if (-not $BuildTarget) {
+            throw "Use --build-target <target> with relwithdebinfo-target. Example: ninja_build.bat -t relwithdebinfo-target --build-target MuseScoreStudio5.exe"
+        }
+        Start-Build -BuildType "RelWithDebInfo" -BuildDir (Join-Path $RepoRoot "build.release")
+    }
+    "debug-target" {
+        if (-not $BuildTarget) {
+            throw "Use --build-target <target> with debug-target. Example: ninja_build.bat -t debug-target --build-target MuseScoreStudio5.exe"
+        }
+        Start-Build -BuildType "Debug" -BuildDir (Join-Path $RepoRoot "build.debug")
     }
     "install" {
         Start-InstallBuild -BuildType "Release" -BuildDir (Join-Path $RepoRoot "build.release")

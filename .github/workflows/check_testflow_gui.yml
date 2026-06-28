@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  testflow-gui:
+  build:
     runs-on: windows-2025
     timeout-minutes: 90
 
@@ -50,16 +50,73 @@ jobs:
       - name: Setup environment
         run: buildscripts\ci\windows\setup.bat
 
+      - name: Install ccache
+        shell: cmd
+        run: choco install ccache -y --no-progress
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('src/**/*.cpp', 'src/**/*.h', 'muse/**/*.cpp', 'muse/**/*.h', 'CMakeLists.txt', 'ninja_build.ps1', 'ninja_build.bat', 'muse/buildscripts/cmake/*.cmake', '.gitmodules') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      - name: Restore build directory cache
+        uses: actions/cache@v4
+        with:
+          path: build.release
+          key: build-release-${{ runner.os }}-${{ hashFiles('src/**/*.cpp', 'src/**/*.h', 'muse/**/*.cpp', 'muse/**/*.h', 'CMakeLists.txt', 'ninja_build.ps1', 'ninja_build.bat', 'muse/buildscripts/cmake/*.cmake', '.gitmodules') }}
+          restore-keys: |
+            build-release-${{ runner.os }}-
+
       - name: Build (RelWithDebInfo)
         shell: cmd
         env:
           MUSE_MODULE_AUDIO_EXPORT: 'OFF'
           MUSE_MODULE_AUDIO_ASIO: 'OFF'
+          CCACHE_DIR: '~/AppData/Local/ccache'
         run: |
           XCOPY "C:\musescore_dependencies" %CD% /E /I /Y
           SET "JACK_DIR=C:\Program Files (x86)\Jack"
           SET "PATH=%JACK_DIR%;%PATH%"
-          ninja_build.bat -t relwithdebinfo
+          SET "CCACHE_DIR=%USERPROFILE%\AppData\Local\ccache"
+          ninja_build.bat -t relwithdebinfo-target -T MuseScoreStudio5.exe
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: musescore-build
+          path: build.release
+          if-no-files-found: error
+          retention-days: 1
+
+  test:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 90
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.10.2
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qt5compat qtnetworkauth qtshadertools qtwebsockets'
+          cache: true
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: musescore-build
+          path: build.release
 
       - name: Pre-seed MuseScore settings
         shell: pwsh
@@ -68,7 +125,7 @@ jobs:
           $settingsDir = "$env:APPDATA\MuseScore"
           New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
           $iniPath = "$settingsDir\MuseScoreStudio5Development.ini"
-          "[application]`r`nhasCompletedFirstLaunchSetup=true`r`nwelcomeDialogShowOnStartup=false" | Set-Content -Path $iniPath -Encoding UTF8
+          "[application]`r`nhasCompletedFirstLaunchSetup=true`r`nwelcomeDialogShowOnStartup=false`r`nwelcomeDialogLastShownVersion=5.0.0" | Set-Content -Path $iniPath -Encoding UTF8
           Write-Host "Wrote settings to $iniPath"
 
       - name: Run testflow GUI test
