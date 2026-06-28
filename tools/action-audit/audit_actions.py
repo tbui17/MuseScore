@@ -176,6 +176,18 @@ def _resolve_uri_variable(source: bytes, var_name: str) -> Optional[str]:
     if match2:
         return match2.group(1).decode('utf-8')
     return None
+def _resolve_action_code_variable(source: bytes, var_name: str) -> Optional[str]:
+    """Find an ActionCode variable declaration and extract its string value.
+
+    Handles patterns like:
+      static const ActionCode VAR_NAME("action-code")
+      ActionCode VAR_NAME("action-code")
+    """
+    pattern = rf'ActionCode\s+{re.escape(var_name)}\s*\(\s*"([^"]+)"'.encode()
+    match = re.search(pattern, source)
+    if match:
+        return match.group(1).decode('utf-8')
+    return None
 
 
 def _extract_handler_method_name(handler_text: str) -> Optional[str]:
@@ -378,17 +390,33 @@ def extract_registrations(tree, source: bytes, source_file: str) -> list[Registr
         if args is None:
             continue
 
+        action_code_node = None
         str_node = _find_first_string_literal(args)
         if str_node is None:
-            continue
-        action_code = _extract_string_literal(str_node, source)
-        if not action_code:
-            continue
+            # The action code might be an ActionCode constant variable (e.g., PLAYBACK_SETUP)
+            # Try to resolve it by searching for its declaration in the file
+            action_code = None
+            action_code_node = None  # track which node was the action code
+            for child in args.children:
+                if child.type == 'identifier':
+                    var_name = source[child.start_byte:child.end_byte].decode('utf-8')
+                    action_code = _resolve_action_code_variable(source, var_name)
+                    if action_code:
+                        action_code_node = child
+                        break
+            if not action_code:
+                continue
+        else:
+            action_code = _extract_string_literal(str_node, source)
+            if not action_code:
+                continue
 
         method_name = None
         for child in args.children:
             if child.type == 'string_literal':
                 continue
+            if child is action_code_node:
+                continue  # skip the action code variable when looking for handler
             text = source[child.start_byte:child.end_byte].decode('utf-8').strip()
             if text == 'this' or text == '':
                 continue
@@ -466,6 +494,45 @@ def get_controller_class(module: str) -> Optional[str]:
 def _find_files_by_pattern(root: str, pattern: str) -> list[str]:
     """Find all files matching a glob pattern under root."""
     return [str(p) for p in Path(root).rglob(pattern)]
+def _trace_method_calls(tree, source: bytes, uri_to_methods: dict[str, set[str]]):
+    """Build a method call graph and add caller methods to uri_to_methods.
+
+    For each method M that contains a URI, find methods that call M and add
+    them to the URI's method set. This catches cases like:
+      openPreferencesDialog() -> doOpenPreferencesDialog() -> open("muse://preferences")
+    where the URI is in a helper method, not the registered method.
+    """
+    # Collect all method names that contain URIs
+    all_uri_methods = set()
+    for methods in uri_to_methods.values():
+        all_uri_methods.update(methods)
+
+    if not all_uri_methods:
+        return
+
+    # For each function_definition in the file, check if it calls any URI-containing method
+    def traverse(node):
+        if node.type == 'function_definition':
+            caller_name = _extract_function_name(node, source)
+            if caller_name is None:
+                return
+            # Get the body text of this function
+            body_text = source[node.start_byte:node.end_byte].decode('utf-8', errors='replace')
+            # Check if it calls any method that contains a URI
+            for target_method in all_uri_methods:
+                if target_method == caller_name:
+                    continue  # skip self-calls
+                # Look for method call pattern: target_method( or this->target_method( or &Class::target_method
+                if re.search(rf'\b{re.escape(target_method)}\s*\(', body_text):
+                    # This caller calls the URI-containing method.
+                    # Add the caller to all URIs that the target method contains.
+                    for uri, methods in uri_to_methods.items():
+                        if target_method in methods:
+                            methods.add(caller_name)
+        for child in node.children:
+            traverse(child)
+
+    traverse(tree.root_node)
 
 
 def scan_codebase(src_dir: str) -> list[Candidate]:
@@ -523,6 +590,7 @@ def scan_codebase(src_dir: str) -> list[Candidate]:
 
     # Step 4: Collect method -> action_code mappings from controller files only
     method_to_codes: dict[str, set[str]] = defaultdict(set)
+    controller_sources: list[tuple[bytes, str]] = []  # (source, file_path) for call tracing
     controller_patterns = ["*controller.cpp", "*actioncontroller.cpp", "*actionscontroller.cpp"]
     seen_files = set()
     for pattern in controller_patterns:
@@ -532,9 +600,17 @@ def scan_codebase(src_dir: str) -> list[Candidate]:
             seen_files.add(file_path)
             source = Path(file_path).read_bytes()
             tree = parser.parse(source)
+            controller_sources.append((source, file_path))
             for reg in extract_registrations(tree, source, file_path):
                 if reg.method_name:
                     method_to_codes[reg.method_name].add(reg.action_code)
+
+    # Step 4b: Build method call graph for transitive tracing
+    # If method A (registered) calls method B (contains URI), A should also map to the URI.
+    # This catches cases like openPreferencesDialog() -> doOpenPreferencesDialog() -> open("uri")
+    for source, file_path in controller_sources:
+        tree = parser.parse(source)
+        _trace_method_calls(tree, source, uri_to_methods)
 
     # Step 5: Trace the chain for each URI
     candidates: list[Candidate] = []
