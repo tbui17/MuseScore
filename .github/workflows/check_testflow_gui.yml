@@ -1,23 +1,9 @@
 name: 'Check: Testflow (GUI)'
 
 on:
-  pull_request:
-    paths:
-      - 'src/app/**'
-      - 'src/appshell/**'
-      - 'share/testflowscripts/**'
-      - 'muse/framework/interactive/**'
-      - 'muse/framework/testflow/**'
-      - '.github/workflows/check_testflow_gui.yml'
   push:
     branches: [main]
-    paths:
-      - 'src/app/**'
-      - 'src/appshell/**'
-      - 'share/testflowscripts/**'
-      - 'muse/framework/interactive/**'
-      - 'muse/framework/testflow/**'
-      - '.github/workflows/check_testflow_gui.yml'
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -62,9 +48,6 @@ jobs:
       - name: Pre-seed MuseScore settings
         shell: pwsh
         run: |
-          # Skip the FirstLaunchSetupDialog on CI — it intercepts keyboard
-          # focus and blocks the testflow script. The setting key is
-          # mu.appshell/application/hasCompletedFirstLaunchSetup.
           $settingsDir = "$env:LOCALAPPDATA\MuseScore\MuseScoreStudio5Development"
           New-Item -ItemType Directory -Force -Path $settingsDir | Out-Null
           $iniPath = "$settingsDir\MuseScoreStudio5.ini"
