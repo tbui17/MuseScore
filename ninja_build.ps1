@@ -167,6 +167,7 @@ $MuseScoreBuildVstModule = Get-EnvDefault "MUSESCORE_BUILD_VST_MODULE" "OFF"
 $MuseScoreBuildWebsocket = Get-EnvDefault "MUSESCORE_BUILD_WEBSOCKET" "OFF"
 $MuseScoreBuildPipewireAudioDriver = Get-EnvDefault "MUSESCORE_BUILD_PIPEWIRE_AUDIO_DRIVER" "OFF"
 $MuseScoreCompileUseUnity = Get-EnvDefault "MUSESCORE_COMPILE_USE_UNITY" "ON"
+$MuseScoreModuleAudioExport = Get-EnvDefault "MUSE_MODULE_AUDIO_EXPORT" "ON"
 
 function Get-ConfigureArgs {
     param(
@@ -206,7 +207,8 @@ function Get-ConfigureArgs {
         "-DMUSE_MODULE_NETWORK_WEBSOCKET=$MuseScoreBuildWebsocket",
         "-DMUSE_MODULE_AUDIO_PIPEWIRE=$MuseScoreBuildPipewireAudioDriver",
         "-DCMAKE_SKIP_RPATH=$MuseScoreNoRpath",
-        "-DMUSE_COMPILE_USE_UNITY=$MuseScoreCompileUseUnity"
+        "-DMUSE_COMPILE_USE_UNITY=$MuseScoreCompileUseUnity",
+        "-DMUSE_MODULE_AUDIO_EXPORT=$MuseScoreModuleAudioExport"
     ) + $AdditionalArgs
 
     if ($CMakeMakeProgramOverride) {
