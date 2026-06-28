@@ -24,6 +24,12 @@ var testCase = {
     name: "TC11: Command Palette opens dialog correctly",
     description: "Verify that running a dialog-opening command from the command palette keeps the target dialog open (transient parent + deferred dispatch regression)",
     steps: [
+        {name: "Dismiss first launch setup dialog if present", func: function() {
+            // On fresh installs (e.g. CI), a First Launch Setup dialog appears
+            // and steals keyboard focus. Dismiss it before interacting.
+            api.keyboard.key("Escape")
+            api.testflow.seeChanges(500)
+        }},
         {name: "Open command palette", func: function() {
             api.dispatcher.dispatch("command-palette")
             api.testflow.waitPopup()

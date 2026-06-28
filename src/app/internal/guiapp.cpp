@@ -151,7 +151,7 @@ void MuseScoreGuiApp::doStartupScenario(const muse::modularity::ContextPtr& ctxI
             // api.keyboard, api.navigation, and api.dispatcher have real
             // targets. The startup page is a local QML file that loads in
             // milliseconds; 2s is generous even on slow machines.
-            QTimer::singleShot(2000, [this, ctxId]() {
+            QTimer::singleShot(5000, [this, ctxId]() {
                 processTestflow(ctxId);
             });
         }
