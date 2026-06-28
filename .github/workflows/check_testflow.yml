@@ -1,0 +1,101 @@
+name: 'Check: Testflow (GUI)'
+
+on:
+  pull_request:
+    paths:
+      - 'src/app/**'
+      - 'src/appshell/**'
+      - 'share/testflowscripts/**'
+      - 'muse/framework/interactive/**'
+      - 'muse/framework/testflow/**'
+      - '.github/workflows/check_testflow.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/app/**'
+      - 'src/appshell/**'
+      - 'share/testflowscripts/**'
+      - 'muse/framework/interactive/**'
+      - 'muse/framework/testflow/**'
+      - '.github/workflows/check_testflow.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }} ${{ github.event_name }} ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testflow-gui:
+    runs-on: windows-2025
+    timeout-minutes: 90
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.10.2
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          modules: 'qt5compat qtnetworkauth qtshadertools qtwebsockets'
+          cache: true
+
+      - name: Setup environment
+        run: buildscripts\ci\windows\setup.bat
+
+      - name: Build (Debug)
+        shell: cmd
+        run: |
+          XCOPY "C:\musescore_dependencies" %CD% /E /I /Y
+          SET "JACK_DIR=C:\Program Files (x86)\Jack"
+          SET "PATH=%JACK_DIR%;%PATH%"
+          ninja_build.bat -t debug
+
+      - name: Run testflow GUI test
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $exe = Join-Path $PWD "build.debug\MuseScoreStudio5.exe"
+          $script = Join-Path $PWD "share\testflowscripts\TC11_CommandPaletteDialog.js"
+          if (-not (Test-Path $exe)) {
+            Write-Host "::error::Build output not found: $exe"
+            exit 1
+          }
+          if (-not (Test-Path $script)) {
+            Write-Host "::error::Testflow script not found: $script"
+            exit 1
+          }
+          Write-Host "Running: $exe --test-case-gui $script"
+          $proc = Start-Process -FilePath $exe -ArgumentList "--test-case-gui",$script -Wait -PassThru -WorkingDirectory $PWD
+          $exitCode = $proc.ExitCode
+          if ($exitCode -ne 0) {
+            Write-Host "::error::Testflow failed with exit code $exitCode"
+            exit $exitCode
+          }
+          Write-Host "Testflow passed!"
+
+      - name: Collect logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $logDir = "$env:LOCALAPPDATA\MuseScore\MuseScoreStudio5Development\logs"
+          if (Test-Path $logDir) {
+            New-Item -ItemType Directory -Force -Path "ci-logs" | Out-Null
+            Copy-Item "$logDir\*.log" -Destination "ci-logs\" -ErrorAction SilentlyContinue
+            Write-Host "Copied logs from $logDir"
+          } else {
+            Write-Host "No log directory found at $logDir"
+          }
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: testflow-logs
+          path: ci-logs/
+          if-no-files-found: ignore
