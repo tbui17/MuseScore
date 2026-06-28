@@ -14,6 +14,21 @@ $PackageName = 'MuseScore Braille Installer'
 $ShortcutName = 'MuseScore Braille Test Build'
 $ExpectedExeRelativePath = 'bin\MuseScoreStudio5.exe'
 
+function Expand-ZipArchive {
+    <#
+    .SYNOPSIS
+        Extracts a ZIP using the .NET ZipFile API instead of Expand-Archive.
+        Expand-Archive on Windows PowerShell 5.1 fails with "You cannot call a method
+        on a null-valued expression" when extracting large ZIPs (170+ MB).
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($Path, $DestinationPath)
+}
+
 function Write-Log {
     param([Parameter(Mandatory = $true)][string]$Message)
     $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -151,7 +166,7 @@ function Resolve-PayloadFromGitHub {
     }
 
     if ($PSCmdlet.ShouldProcess($extractRoot, 'Extract installer package')) {
-        Expand-Archive -LiteralPath $zipPath -DestinationPath $extractRoot -Force
+        Expand-ZipArchive -Path $zipPath -DestinationPath $extractRoot
     }
 
     if ($WhatIfPreference) {
@@ -269,7 +284,7 @@ try {
     Write-Log "Extracting payload to: $InstallRoot"
     if ($PSCmdlet.ShouldProcess($InstallRoot, 'Extract payload')) {
         New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
-        Expand-Archive -LiteralPath $PayloadZip -DestinationPath $InstallRoot -Force
+        Expand-ZipArchive -Path $PayloadZip -DestinationPath $InstallRoot
     }
 
     if (-not $WhatIfPreference -and -not (Test-Path -LiteralPath $InstalledExe -PathType Leaf)) {
