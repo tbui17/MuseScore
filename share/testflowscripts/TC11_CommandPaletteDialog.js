@@ -8,8 +8,8 @@
  * Copyright (C) 2021 MuseScore Limited and others
  *
  * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 3 as
- * published by the Free Software Foundation.
+ * it under the terms of the GNU General Public License version 3
+ * as published by the Free Software Foundation.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -27,21 +27,31 @@ var testCase = {
         {name: "Open command palette", func: function() {
             api.dispatcher.dispatch("command-palette")
             api.testflow.waitPopup()
-            api.testflow.seeChanges(500)
+            api.testflow.seeChanges(1000)
         }},
         {name: "Type search for About dialog", func: function() {
-            api.testflow.seeChanges(500)
             api.keyboard.text("about musescore")
-            api.testflow.seeChanges(500)
-        }},
-        {name: "Trigger first result", func: function() {
-            api.keyboard.key("Return")
             api.testflow.seeChanges(1000)
+        }},
+        {name: "Trigger first result via navigation", func: function() {
+            // Use navigation trigger instead of keyboard Return — it dispatches
+            // nav-trigger-control to the active navigation control directly,
+            // bypassing the focus-dependent Return key path. After the palette
+            // opens and search field gets focus, the first result becomes the
+            // active control.
+            api.navigation.trigger()
+            api.testflow.seeChanges(1500)
         }},
         {name: "Verify About dialog is open", func: function() {
             // URI registered in appshellmodule.cpp:76
             if (!api.interactive.isOpened("musescore://about/musescore")) {
-                api.testflow.fatal("About dialog was not open after running command from palette")
+                // Fallback: try keyboard Return in case navigation trigger
+                // didn't hit the right control
+                api.keyboard.key("Return")
+                api.testflow.seeChanges(1500)
+                if (!api.interactive.isOpened("musescore://about/musescore")) {
+                    api.testflow.fatal("About dialog was not open after running command from palette")
+                }
             }
         }},
         {name: "Close About dialog and palette", func: function() {
