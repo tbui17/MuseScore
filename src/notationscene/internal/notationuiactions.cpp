@@ -590,6 +590,12 @@ const UiActionList NotationUiActions::s_actions = {
              TranslatableString("action", "Measure properties…"),
              TranslatableString("action", "Measure properties")
              ),
+    UiAction("config-raster",
+             mu::context::UiCtxProjectOpened,
+             mu::context::CTX_NOTATION_OPENED,
+             TranslatableString("action", "Edit grid size…"),
+             TranslatableString("action", "Edit grid size")
+             ),
     UiAction("measures-per-system",
              mu::context::UiCtxProjectOpened,
              mu::context::CTX_NOTATION_OPENED,
