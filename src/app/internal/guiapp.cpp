@@ -13,6 +13,7 @@
 #include "log.h"
 
 #include <QTimer>
+#include <cstdlib>
 
 using namespace muse;
 using namespace mu;
@@ -217,5 +218,15 @@ void MuseScoreGuiApp::processTestflow(const muse::modularity::ContextPtr& ctxId)
     // determined, skipping Qt teardown is the correct tradeoff for a test
     // runner. If the framework bug is fixed upstream, switch back to
     // qApp->exit() for proper cleanup.
-    std::exit(exitCode);
+    // Use _exit (not std::exit) to skip static destructors entirely.
+    // std::exit runs static teardown (QueuePool singleton, Qt singletons, etc.)
+    // while other threads (async ticker, audio) are still alive, causing
+    // access-violation races. execScript() has already completed and called
+    // restoreAffectOnServices(); the test result is determined, so skipping
+    // static destruction is safe for a test runner.
+    // Flush stdio buffers before _exit — _exit skips atexit/fflush, so
+    // testflow output written to stdout/stderr would be lost without this.
+    fflush(stdout);
+    fflush(stderr);
+    _exit(exitCode);
 }

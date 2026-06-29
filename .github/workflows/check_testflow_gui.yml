@@ -7,7 +7,11 @@ on:
       - '.github/workflows/check_testflow_gui.yml'
       - 'share/testflowscripts/**'
       - 'src/app/**'
+      - 'src/appshell/**'
       - 'muse/framework/interactive/**'
+      - 'muse/framework/accessibility/**'
+      - 'muse/framework/ui/api/**'
+      - 'muse/framework/global/thirdparty/kors_async/**'
       - 'muse/framework/testflow/**'
       - '.gitmodules'
       - 'ninja_build.ps1'
@@ -16,7 +20,11 @@ on:
       - '.github/workflows/check_testflow_gui.yml'
       - 'share/testflowscripts/**'
       - 'src/app/**'
+      - 'src/appshell/**'
       - 'muse/framework/interactive/**'
+      - 'muse/framework/accessibility/**'
+      - 'muse/framework/ui/api/**'
+      - 'muse/framework/global/thirdparty/kors_async/**'
       - 'muse/framework/testflow/**'
       - '.gitmodules'
       - 'ninja_build.ps1'
@@ -128,30 +136,39 @@ jobs:
           "[application]`r`nhasCompletedFirstLaunchSetup=true`r`nwelcomeDialogShowOnStartup=false`r`nwelcomeDialogLastShownVersion=5.0.0" | Set-Content -Path $iniPath -Encoding UTF8
           Write-Host "Wrote settings to $iniPath"
 
-      - name: Run testflow GUI test
+      - name: Run testflow GUI tests
         shell: pwsh
         timeout-minutes: 10
         env:
           QT_QUICK_BACKEND: 'software'
         run: |
           $exe = Join-Path $PWD "build.release\MuseScoreStudio5.exe"
-          $script = Join-Path $PWD "share\testflowscripts\TC11_CommandPaletteDialog.js"
+          $scripts = @(
+            "TC11_CommandPaletteDialog.js",
+            "TC14_CommandPaletteAnnounce.js"
+          )
           if (-not (Test-Path $exe)) {
             Write-Host "::error::Build output not found: $exe"
             exit 1
           }
-          if (-not (Test-Path $script)) {
-            Write-Host "::error::Testflow script not found: $script"
-            exit 1
+          $failed = $false
+          foreach ($name in $scripts) {
+            $script = Join-Path $PWD "share\testflowscripts\$name"
+            if (-not (Test-Path $script)) {
+              Write-Host "::error::Testflow script not found: $script"
+              exit 1
+            }
+            Write-Host "Running: $exe --test-case-gui $script"
+            $proc = Start-Process -FilePath $exe -ArgumentList "--test-case-gui",$script -Wait -PassThru -WorkingDirectory $PWD
+            $exitCode = $proc.ExitCode
+            if ($exitCode -ne 0) {
+              Write-Host "::error::Testflow failed with exit code $exitCode for script: $name"
+              $failed = $true
+            } else {
+              Write-Host "Testflow passed: $name"
+            }
           }
-          Write-Host "Running: $exe --test-case-gui $script"
-          $proc = Start-Process -FilePath $exe -ArgumentList "--test-case-gui",$script -Wait -PassThru -WorkingDirectory $PWD
-          $exitCode = $proc.ExitCode
-          if ($exitCode -ne 0) {
-            Write-Host "::error::Testflow failed with exit code $exitCode"
-            exit $exitCode
-          }
-          Write-Host "Testflow passed!"
+          if ($failed) { exit 1 }
 
       - name: Collect logs on failure
         if: failure()

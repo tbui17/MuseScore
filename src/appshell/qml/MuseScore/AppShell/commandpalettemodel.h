@@ -14,6 +14,8 @@
 #include "modularity/ioc.h"
 #include "ui/iuiactionsregister.h"
 
+#include "accessibility/iaccessibilitycontroller.h"
+
 namespace mu::appshell {
 class CommandPaletteModel : public QAbstractListModel, public muse::Contextable, public muse::async::Asyncable
 {
@@ -29,6 +31,8 @@ public:
     muse::GlobalInject<IAppShellConfiguration> configuration;
     muse::ContextInject<muse::ui::IUiActionsRegister> uiActionsRegister = { this };
     muse::ContextInject<muse::actions::IActionsDispatcher> dispatcher = { this };
+
+    muse::ContextInject<muse::accessibility::IAccessibilityController> accessibilityController = { this };
 
     explicit CommandPaletteModel(QObject* parent = nullptr);
 
