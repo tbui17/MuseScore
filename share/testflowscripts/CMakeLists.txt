@@ -34,6 +34,7 @@ install(FILES
       TC11_CommandPaletteDialog.js
       TC12_PlaybackSpeedDialog.js
       TC13_SetTempoUpdate.js
+      TC14_CommandPaletteAnnounce.js
       DESTINATION ${MUSE_APP_INSTALL_RESOURCES_LOCATION}/testflowscripts
       )
 

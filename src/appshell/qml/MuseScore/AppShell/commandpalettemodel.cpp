@@ -111,6 +111,15 @@ void CommandPaletteModel::moveSelection(int delta)
     int nextIndex = m_selectedIndex < 0 ? 0 : m_selectedIndex + delta;
     nextIndex = std::clamp(nextIndex, 0, static_cast<int>(m_items.size()) - 1);
     setSelectedIndex(nextIndex);
+
+    if (accessibilityController()) {
+        const Item& item = m_items.at(nextIndex);
+        QString announcement = muse::qtrc("appshell/commandpalette", "%1, %2 of %3")
+            .arg(item.title)
+            .arg(nextIndex + 1)
+            .arg(m_items.size());
+        accessibilityController()->announce(announcement);
+    }
 }
 
 bool CommandPaletteModel::runSelected()
