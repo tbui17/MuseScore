@@ -37,6 +37,7 @@
 #include "internal/startupscenario.h"
 #include "internal/applicationactioncontroller.h"
 #include "internal/sessionsmanager.h"
+#include "internal/regionentryannouncer.h"
 
 #ifdef Q_OS_MAC
 #include "internal/platform/macos/macosappmenumodelhook.h"
@@ -106,6 +107,7 @@ void AppShellContext::registerExports()
     m_applicationActionController = std::make_shared<ApplicationActionController>(iocContext());
     m_applicationUiActions = std::make_shared<ApplicationUiActions>(m_applicationActionController, iocContext());
     m_sessionsManager = std::make_shared<SessionsManager>(iocContext());
+    m_regionEntryAnnouncer = std::make_shared<RegionEntryAnnouncer>(iocContext());
 
     ioc()->registerExport<IAppShellState>(mname, m_appshellState);
     ioc()->registerExport<IStartupScenario>(mname, new StartupScenario(iocContext()));
@@ -138,6 +140,7 @@ void AppShellContext::onInit(const muse::IApplication::RunMode& mode)
     if (mode == IApplication::RunMode::GuiApp) {
         m_applicationUiActions->init();
         m_applicationActionController->init();
+        m_regionEntryAnnouncer->init();
     }
 }
 
