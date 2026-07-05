@@ -22,6 +22,7 @@
 #include "regionentryannouncer.h"
 
 #include "translation.h"
+#include "context/uicontext.h"
 
 using namespace mu::appshell;
 using namespace muse;
@@ -45,6 +46,21 @@ void RegionEntryAnnouncer::onContextChanged()
     }
 
     const UiContext& ctx = uiContextResolver()->currentUiContext();
+
+    // Suppress redundant "Score view" when tabbing between score canvas and
+    // toolbar/status bar — both are "in the score" contexts. Only announce
+    // when entering the project from outside (Home, publish, etc.).
+    bool wasInProject = m_lastContext == mu::context::UiCtxProjectFocused
+                        || m_lastContext == mu::context::UiCtxProjectOpened;
+    bool isInProject = ctx == mu::context::UiCtxProjectFocused
+                       || ctx == mu::context::UiCtxProjectOpened;
+    if (wasInProject && isInProject) {
+        m_lastContext = ctx;
+        return;
+    }
+
+    m_lastContext = ctx;
+
     QString message = messageForContext(ctx);
     if (message.isEmpty()) {
         return;
