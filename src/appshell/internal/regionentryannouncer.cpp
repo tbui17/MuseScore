@@ -22,7 +22,6 @@
 #include "regionentryannouncer.h"
 
 #include "translation.h"
-#include "log.h"
 
 using namespace mu::appshell;
 using namespace muse;

@@ -5,8 +5,11 @@ var testCase = {
         {name: "Wait for notation page to settle", func: function() {
             api.testflow.seeChanges(1500)
         }},
-        {name: "Tab into score view — announce 'Score view'", func: function() {
+        {name: "Focus toolbar to establish deterministic starting context", func: function() {
+            api.keyboard.key("Escape")
             api.testflow.seeChanges(500)
+        }},
+        {name: "Tab into score view — announce 'Score view'", func: function() {
             api.keyboard.key("Tab")
             api.testflow.seeChanges(1000)
             var ann = api.accessibility.announcement()

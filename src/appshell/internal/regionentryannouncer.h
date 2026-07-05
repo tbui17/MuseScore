@@ -22,6 +22,7 @@
 #ifndef MU_APPSHELL_REGIONENTRYANNOUNCER_H
 #define MU_APPSHELL_REGIONENTRYANNOUNCER_H
 
+#include <QString>
 #include "modularity/ioc.h"
 #include "async/asyncable.h"
 #include "accessibility/iaccessibilitycontroller.h"
