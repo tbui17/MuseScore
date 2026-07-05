@@ -36,15 +36,13 @@ class RegionEntryAnnouncer : public muse::Contextable, public muse::async::Async
 
 public:
     RegionEntryAnnouncer(const muse::modularity::ContextPtr& iocCtx)
-        : muse::Contextable(iocCtx), m_lastContext(mu::context::UiCtxUnknown) {}
+        : muse::Contextable(iocCtx) {}
 
     void init();
 
 private:
     void onContextChanged();
     QString messageForContext(const muse::ui::UiContext& ctx) const;
-
-    muse::ui::UiContext m_lastContext;
 };
 }
 

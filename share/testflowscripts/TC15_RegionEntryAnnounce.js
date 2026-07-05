@@ -42,12 +42,12 @@ var testCase = {
                 api.testflow.fatal("Should NOT re-announce 'Score view' when tabbing from score canvas to status bar, got: '" + ann + "'")
             }
         }},
-        {name: "Tab back to score canvas — should NOT re-announce 'Score view'", func: function() {
-            api.keyboard.key("Tab")
+        {name: "Return to score canvas — should announce 'Score view'", func: function() {
+            api.navigation.goToControl("NotationView", "ScoreView", "Score")
             api.testflow.seeChanges(1000)
             var ann = api.accessibility.announcement()
-            if (ann && ann.indexOf("Score view") !== -1) {
-                api.testflow.fatal("Should NOT re-announce 'Score view' when tabbing back to score canvas, got: '" + ann + "'")
+            if (!ann || ann.indexOf("Score view") === -1) {
+                api.testflow.fatal("Expected 'Score view' announcement when returning to score canvas, got: '" + ann + "'")
             }
         }},
         {name: "F6 to next section — should NOT re-announce 'Score view'", func: function() {
