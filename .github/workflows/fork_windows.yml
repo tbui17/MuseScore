@@ -166,11 +166,15 @@ jobs:
             throw "Pinned ccache archive did not contain $ccache"
           }
           Add-Content -Path $env:GITHUB_PATH -Value $bin
-          $reported = (& $ccache --version 2>&1 | Select-Object -First 1)
-          if ($LASTEXITCODE -ne 0 -or $reported -notmatch "ccache.*$env:CCACHE_VERSION") {
-            throw "Pinned ccache reported an unexpected version: $reported"
+          $reportedOutput = & $ccache --version 2>&1 | Out-String
+          $reportedExitCode = $LASTEXITCODE
+          $reported = $reportedOutput.Trim()
+          $reportedMatch = [regex]::Match($reportedOutput, '(?im)^\s*ccache version (?<version>\d+(?:\.\d+)+)\s*$')
+          $reportedVersion = if ($reportedMatch.Success) { $reportedMatch.Groups["version"].Value } else { "" }
+          if ($reportedExitCode -ne 0 -or -not $reportedMatch.Success -or $reportedVersion -ne $env:CCACHE_VERSION) {
+            throw "Pinned ccache reported an unexpected version (exit $reportedExitCode): $reported"
           }
-          Write-Host "Pinned ccache $reported from verified $archive"
+          Write-Host "Pinned ccache $reportedVersion from verified $archive"
       - name: Resolve cache identity from native toolchain
         id: cache_identity
         if: needs.preflight.outputs.effective_use_cache == 'true'
@@ -193,11 +197,16 @@ jobs:
             "-CcacheDirectory", "./build-output/ccache",
             "-CacheIdentityOnly"
           )
-          $json = & $helper @helperArgs | Select-Object -Last 1
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cache identity helper failed with exit code $LASTEXITCODE"
+          $identityOutput = & pwsh -NoProfile -NonInteractive -File $helper @helperArgs
+          $identityExitCode = $LASTEXITCODE
+          $json = @($identityOutput | Select-Object -Last 1)
+          if ($identityExitCode -ne 0) {
+            throw "Cache identity helper failed with exit code $identityExitCode"
           }
-          $identity = $json | ConvertFrom-Json
+          if ($json.Count -ne 1) {
+            throw "Cache identity helper did not emit exactly one JSON result"
+          }
+          $identity = $json[0] | ConvertFrom-Json
           foreach ($name in @("ccache_key", "ccache_restore_prefix", "deps_key", "qt_cache_prefix")) {
             $value = [string]$identity.$name
             if ([string]::IsNullOrWhiteSpace($value)) {
@@ -254,7 +263,10 @@ jobs:
           if ("${{ needs.preflight.outputs.effective_use_cache }}" -eq "true") {
             $helperArgs += @("-UseCache", "-CcacheDirectory", "./build-output/ccache")
           }
-          & ./pipeline/buildscripts/ci/fork/windows-build.ps1 @helperArgs
+          & pwsh -NoProfile -NonInteractive -File ./pipeline/buildscripts/ci/fork/windows-build.ps1 @helperArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows build helper failed with exit code $LASTEXITCODE"
+          }
       - name: Save compiler object cache
         if: >-
           needs.preflight.outputs.effective_use_cache == 'true' &&
