@@ -32,6 +32,7 @@ gh run list --repo tbui17/MuseScore --workflow fork_windows.yml \
 ```
 
 PowerShell uses backticks rather than Bash continuations, or put the command on one line. `source_ref` is an input, while `--ref main` selects the trusted workflow revision; do not confuse them.
+The example passes `use_cache=false` explicitly to exercise the cold path. Omitting that field on a trusted push or manual dispatch uses the default `true`; that default does not constitute warm qualification.
 
 Use the matching workflow, actor, trigger time, ref and SHA to identify your run, not the latest unrelated repository run. Record the actual run ID and candidate artifact name from that run:
 
@@ -49,9 +50,15 @@ On PowerShell, use `Get-FileHash -Algorithm SHA256` on the ZIP and compare it wi
 
 ## Cold builds and toolchain maintenance
 
-The qualification path uses fresh build/install directories and no restored dependency or compiler cache. `use_cache=false` requests the cold path.
+The qualification path uses fresh build/install directories. `use_cache=false` explicitly requests that cold path. Trusted push and manual runs default `use_cache=true`; pull requests force the effective value to `false`, and the preflight output `effective_use_cache` is the value consumed by every cache control.
 
-`use_cache` is part of the public interface, but it is **not qualified yet** and is therefore fail-closed: preflight refuses `use_cache=true` with an explicit error instead of accepting it and silently running an uncached build under a cached label. The input keeps a provisional `false` default. It becomes effective only after the caching phase is implemented and a cold full-feature hosted run has demonstrably succeeded; a warm run must then report actual compiler hits, not merely an installed launcher. Never restore `build.release` or CMakeCache.txt in the authoritative path.
+The cache plan is deliberately limited to build outputs. The compiler object cache is the helper-owned `build-output/ccache` directory, provisioned with pinned ccache 4.13.6 and bounded at 4G. The dependency cache restores and saves only completed archives at `source/muse/build.release/_deps/<payload>/.pinned/<64 lowercase SHA-256>`; `.part-*` files, `payloads.identity`, extracted trees, CMake metadata and `build.release` are not cache artifacts. The helper starts from a fresh configured tree and rejects an existing `CMakeCache.txt`.
+
+Compiler-cache identity includes the Visual Studio/VCTools/compiler banner, Windows SDK, CMake, Ninja, Qt/modules, dependency-lock SHA-256, compiler flags SHA-256 and ccache version. The normal profile keeps `MUSE_COMPILE_USE_PCH=ON`, and that setting is included in the flags namespace. A dependency-lock change therefore changes both dependency-archive and compiler-object namespaces; a compiler or SDK change changes the compiler-object namespace.
+
+Cache restore and save are never performed on pull-request events. The authoritative build does not restore or save `build.release`, `CMakeCache.txt`, or an extracted dependency tree. A cache hit must be reported through the matched-key/provenance evidence and real ccache statistics, not inferred from a launcher path.
+
+Exact whole-run warm qualification remains pending. The first green hosted run was cold; before describing caching or a release path as qualified, run the entire cache-enabled workflow on a fresh hosted runner and verify the same build/package/runtime/readiness evidence plus actual compiler hits. A local identity or launcher smoke is supporting evidence only, not that qualification.
 
 Baseline tools: standard `windows-2025`, Qt 6.10.2, `win64_msvc2022_64`, modules `qt5compat qtnetworkauth qtshadertools qtwebsockets`, 4 compile jobs and a 240-minute safety timeout. Actual runner image, compiler, SDK, CMake, Ninja, Python and Qt versions belong in build evidence. A runner label does not freeze MSVC. Change a toolchain pin only after reproducing a compatibility issue and requalify cold and warm artifacts.
 
@@ -103,7 +110,7 @@ Hosted runs are recorded run by run in `ci-baseline.md`. Run `34777803748` is th
 Open blockers for the hosted milestones:
 
 1. **Workflow-scope token (resolved for this branch).** The authenticated `gh` token reports scopes that do not include `workflow` (`repo`, `admin:*`, `user`, `gist`, ... are present), so HTTPS pushes that add or modify `.github/workflows/*` are rejected. The owner's existing SSH key pushed the branch instead (`git push git@github.com:tbui17/MuseScore.git ci/fork-windows-releases:ci/fork-windows-releases`, no force update). Future workflow-file pushes need the same path or a token re-authorised with `workflow` scope.
-2. **Cold hosted qualification** is recorded by run `34777803748` (all mandatory jobs green, artifact hash verified locally). Later gates remain unproven: `use_cache=true` is still refused by preflight rather than accepted and ignored, the opt-in draft-release path has not been exercised, and macOS/Linux release packaging is out of scope until Windows parity work continues.
+2. **Cold hosted qualification** is recorded by run `34777803748` (all mandatory jobs green, artifact hash verified locally). Later gates remain unproven: the cache-enabled `use_cache=true` path has not had an exact whole-run warm qualification with real compiler hits, the opt-in draft-release path has not been exercised, and macOS/Linux release packaging is out of scope until Windows parity work continues.
 3. **Merge approval:** merging the framework PR or the application branch into `main` is an owner decision and is not performed by this pipeline. The draft-release path additionally requires the workflow to run from `main` with a source commit already merged into `main`.
 
 ## Deferred work

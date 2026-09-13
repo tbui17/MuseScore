@@ -59,6 +59,17 @@ def valid_tag(value):
     command("git", "check-ref-format", "refs/tags/" + value)
     return value
 
+def resolve_effective_use_cache(event, requested):
+    """Resolve the single cache policy used by preflight and every cache step."""
+    requested = (requested or "").strip().lower()
+    if requested not in ("", "true", "false"):
+        raise ValueError("use_cache must be true or false")
+    if event == "pull_request":
+        return False
+    if requested == "false":
+        return False
+    return event in ("push", "workflow_dispatch")
+
 
 def check_submodule(source, repository):
     owner = "tbui17" if repository == REPOSITORY else "musescore"
@@ -90,15 +101,7 @@ def preflight(args):
     event = os.environ["GITHUB_EVENT_NAME"]
     release = os.environ.get("CREATE_RELEASE", "false") == "true"
     workflow_sha = valid_sha(os.environ["WORKFLOW_SHA"])
-    if os.environ.get("USE_CACHE", "false") == "true":
-        # The caching phase is deliberately gated on a demonstrated cold hosted build. Until
-        # that gate is recorded in docs/fork-ci.md, an accepted use_cache=true would silently
-        # be a cold build, so the request is refused instead of ignored.
-        raise ValueError(
-            "use_cache=true is not qualified yet: compiler caching is added only after a cold "
-            "hosted build has succeeded, so the pipeline refuses to serve an uncached build "
-            "under a cached label. Re-run with use_cache=false; the qualification gate is "
-            "documented in docs/fork-ci.md")
+    effective_use_cache = resolve_effective_use_cache(event, os.environ.get("USE_CACHE"))
     requested = valid_ref(os.environ.get("SOURCE_REF", "main")) if event == "workflow_dispatch" else valid_sha(os.environ["GITHUB_SHA"])
     if release:
         if event != "workflow_dispatch" or os.environ["GITHUB_REF"] != "refs/heads/main":
@@ -120,7 +123,8 @@ def preflight(args):
         raise ValueError("Selected source lacks the committed framework dependency repair; update its gitlink through review")
     provenance = dict(repository=repository, requested_source_ref=requested, source_sha=source_sha,
                       framework_url=url, framework_sha=framework_sha, workflow_sha=workflow_sha,
-                      run_id=os.environ["GITHUB_RUN_ID"], run_attempt=os.environ["GITHUB_RUN_ATTEMPT"])
+                      run_id=os.environ["GITHUB_RUN_ID"], run_attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+                      effective_use_cache="true" if effective_use_cache else "false")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
     if os.environ.get("GITHUB_OUTPUT"):
@@ -128,7 +132,6 @@ def preflight(args):
             for name, value in provenance.items():
                 output.write(f"{name}={value}\n")
     print(json.dumps(provenance, indent=2))
-
 
 def verify_artifact(directory, expected):
     directory = directory.resolve()

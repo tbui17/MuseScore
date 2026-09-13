@@ -178,6 +178,7 @@ $MuseScoreBuildVstModule = Get-EnvDefault "MUSESCORE_BUILD_VST_MODULE" "OFF"
 $MuseScoreBuildWebsocket = Get-EnvDefault "MUSESCORE_BUILD_WEBSOCKET" "OFF"
 $MuseScoreBuildPipewireAudioDriver = Get-EnvDefault "MUSESCORE_BUILD_PIPEWIRE_AUDIO_DRIVER" "OFF"
 $MuseScoreCompileUseUnity = Get-EnvDefault "MUSESCORE_COMPILE_USE_UNITY" "ON"
+$MuseScoreCompileUsePch = Get-EnvDefault "MUSE_COMPILE_USE_PCH" "ON"
 $MuseScoreModuleAudioExport = Get-EnvDefault "MUSE_MODULE_AUDIO_EXPORT" "ON"
 $MuseScoreModuleAudioAsio = Get-EnvDefault "MUSE_MODULE_AUDIO_ASIO" "ON"
 
@@ -237,6 +238,7 @@ function Get-ConfigureArgs {
         "-DMUSE_MODULE_AUDIO_PIPEWIRE=$MuseScoreBuildPipewireAudioDriver",
         "-DCMAKE_SKIP_RPATH=$MuseScoreNoRpath",
         "-DMUSE_COMPILE_USE_UNITY=$MuseScoreCompileUseUnity",
+        "-DMUSE_COMPILE_USE_PCH=$MuseScoreCompileUsePch",
         "-DMUSE_MODULE_AUDIO_EXPORT=$MuseScoreModuleAudioExport",
         "-DMUSE_MODULE_AUDIO_ASIO=$MuseScoreModuleAudioAsio",
         "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$MuseScoreMsvcDebugFormat"
@@ -245,7 +247,8 @@ function Get-ConfigureArgs {
     if ($MuseScoreUseCcache -eq "ON") {
         $args += @(
             "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-            "-DCMAKE_C_COMPILER_LAUNCHER=ccache"
+            "-DCMAKE_C_COMPILER_LAUNCHER=ccache",
+            "-DMUSE_COMPILE_USE_COMPILER_CACHE=ON"
         )
     }
     else {
@@ -277,7 +280,7 @@ function Assert-NoCompilerCacheConfigured {
         return
     }
 
-    $launcherPattern = '(^|\s|\\)(ccache|sccache|buildcache)(\.exe)?(\s|$)'
+    $launcherPattern = '(^|\s|[\\/]|["\x27])(ccache|sccache|buildcache)(\.exe)?["\x27]?(?=\s|$)'
     foreach ($relativePath in @("build.ninja", "rules.ninja", "CMakeFiles\rules.ninja")) {
         $file = Join-Path $BuildDir $relativePath
         if (-not (Test-Path -LiteralPath $file)) {

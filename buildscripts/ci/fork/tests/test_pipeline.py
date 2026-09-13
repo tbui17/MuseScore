@@ -73,23 +73,23 @@ class TrustBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Checksum"):
             pipeline.verify_artifact(self.directory, self.expected)
 
-    def test_unqualified_compiler_cache_request_is_refused(self):
-        class Args:
-            source = self.directory
-            output = self.directory / "provenance.json"
-
-        environment = {
-            "GITHUB_REPOSITORY": pipeline.REPOSITORY,
-            "GITHUB_EVENT_NAME": "workflow_dispatch",
-            "GITHUB_REF": "refs/heads/main",
-            "WORKFLOW_SHA": "b" * 40,
-            "SOURCE_REF": "main",
-            "USE_CACHE": "true",
-        }
-        with patch.dict(os.environ, environment), patch.object(pipeline, "api") as api:
-            with self.assertRaisesRegex(ValueError, "use_cache"):
-                pipeline.preflight(Args())
-            api.assert_not_called()
+    def test_effective_cache_policy_handles_event_and_input_boundaries(self):
+        cases = (
+            ("push", "", True),
+            ("push", "true", True),
+            ("push", "false", False),
+            ("workflow_dispatch", "", True),
+            ("workflow_dispatch", "true", True),
+            ("workflow_dispatch", "false", False),
+            ("pull_request", "true", False),
+            ("pull_request", "false", False),
+            ("schedule", "true", False),
+        )
+        for event, requested, expected in cases:
+            with self.subTest(event=event, requested=requested):
+                self.assertEqual(pipeline.resolve_effective_use_cache(event, requested), expected)
+        with self.assertRaisesRegex(ValueError, "true or false"):
+            pipeline.resolve_effective_use_cache("push", "unexpected")
 
     def test_untrusted_event_never_calls_release_api(self):
         with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request", "CREATE_RELEASE": "true"}), patch.object(pipeline, "api") as api:

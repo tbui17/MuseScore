@@ -19,8 +19,9 @@
 #
 # Recipe (fixed): RelWithDebInfo full desktop app via `-t installrelwithdebinfo
 # -j 4`, audio export + ASIO + VST + websocket + accessibility + braille on,
-# crash upload off, update module off, compiler cache explicitly off, and the
-# soundfont pinned to the payload committed in the source tree (no S3 refresh).
+# crash upload off, update module off, and the soundfont pinned to the payload
+# committed in the source tree (no S3 refresh). Trusted runs may opt into the
+# explicitly provisioned compiler-object and dependency-archive caches.
 #
 # Deliberately not used: buildscripts/ci/windows/setup.bat and build.bat. The
 # legacy path deletes C:\TEMP, downloads unverified payloads and enables
@@ -48,7 +49,18 @@ param(
     [string] $BuildNumber,
 
     # Recorded in provenance only.
-    [string] $SourceRef = ""
+    [string] $SourceRef = "",
+
+    # Compiler-object caching. Trusted workflow runs enable it after the cold gate; the workflow
+    # always passes an explicit directory so this helper never guesses a cache location.
+    [switch] $UseCache,
+
+    [string] $CcacheDirectory = "",
+
+    # Print the cache identity (toolchain, SDK, CMake, Qt, dependency lock, build flags, ccache) as
+    # one JSON line and exit without building, so the workflow derives cache keys from the same
+    # measurements this helper enforces during the build.
+    [switch] $CacheIdentityOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,6 +73,20 @@ $BuildType = "RelWithDebInfo"
 $Channel = "dev"
 $Architecture = "x64"
 $Int32Max = [int]::MaxValue
+$PinnedCcacheVersion = "4.13.6"
+$CcacheSchema = "1"
+$CcacheMaxSize = "4G"
+$QtModules = "qt5compat qtnetworkauth qtshadertools qtwebsockets"
+$DetectedCcacheVersion = ""
+$cacheIdentity = [ordered]@{}
+$ccacheStatsSummary = [ordered]@{}
+
+if ($UseCache -and [string]::IsNullOrWhiteSpace($CcacheDirectory)) {
+    throw "-UseCache requires -CcacheDirectory: a cache directory must be explicit and helper-owned."
+}
+if (-not $UseCache -and -not [string]::IsNullOrWhiteSpace($CcacheDirectory)) {
+    throw "-CcacheDirectory was passed without -UseCache; a cold build must not receive a cache directory."
+}
 
 function Write-Step {
     param([Parameter(Mandatory = $true)][string] $Message)
@@ -132,6 +158,27 @@ function Get-ReportedVersion {
 
     $firstLine = @((Invoke-Tool -FilePath $FilePath -Arguments $VersionArguments -Purpose "$FilePath $($VersionArguments -join ' ')") -split "`r?`n")[0]
     return ([regex]::Match($firstLine, '\d+(\.\d+)+')).Value
+}
+function Get-MsvcCompilerVersion {
+    param([Parameter(Mandatory = $true)][string] $FilePath)
+
+    # cl /Bv prints the authoritative banner before reporting D8003 because no source file
+    # was supplied. Accept only that documented missing-source result; any other nonzero exit
+    # means the compiler probe itself failed.
+    $output = & $FilePath "/Bv" 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+    $match = [regex]::Match($output, '(?im)^\s*Microsoft \(R\) C/C\+\+ Optimizing Compiler Version (?<version>\d+(?:\.\d+)+) for (?<arch>\S+)')
+    if (-not $match.Success) {
+        throw "cl.exe at '$FilePath' did not report an MSVC compiler banner through /Bv."
+    }
+    if ($match.Groups["arch"].Value -ne "x64") {
+        throw "cl.exe at '$FilePath' reported target '$($match.Groups["arch"].Value)' instead of x64."
+    }
+    if ($exitCode -ne 0 -and $output -notmatch '(?im)D8003\s*:\s*missing source filename') {
+        throw "cl.exe /Bv failed with exit code $exitCode after reporting its banner: $output"
+    }
+    Write-Host "cl.exe /Bv banner: $($match.Groups["version"].Value) for $($match.Groups["arch"].Value) (exit $exitCode)"
+    return $match.Groups["version"].Value
 }
 
 function Import-MsvcEnvironment {
@@ -236,11 +283,130 @@ function Assert-CacheValue {
 
     return $actual
 }
+function Assert-Ccache {
+    param([Parameter(Mandatory = $true)][string] $Directory)
+
+    $command = Get-Command ccache -ErrorAction SilentlyContinue
+    if (-not $command) {
+        throw "ccache was not found on PATH although compiler caching is enabled."
+    }
+    $path = if ($command.Source) { $command.Source } else { $command.Path }
+    $path = Get-FullPath $path
+    $reported = Get-ReportedVersion -FilePath $path -VersionArguments @("--version")
+    if (-not $reported) {
+        throw "ccache at '$path' did not report a version."
+    }
+    if ([version]$reported -lt [version]"4.10") {
+        throw "ccache $reported is older than the required 4.10 (MSVC /Z7 PCH support)."
+    }
+    if ([version]$reported -ne [version]$PinnedCcacheVersion) {
+        throw "ccache $reported does not match the pinned $PinnedCcacheVersion; update the pin deliberately."
+    }
+    if (-not (Test-Path -LiteralPath $Directory)) {
+        New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    }
+    Write-Host "ccache: $path ($reported, dir $Directory, max $CcacheMaxSize)"
+    $script:DetectedCcacheVersion = "$reported"
+    return $path
+}
+
+function Write-CcacheStats {
+    param([Parameter(Mandatory = $true)][string] $Phase)
+
+    $output = & ccache -s 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        throw "ccache statistics failed during '$Phase' with exit code $LASTEXITCODE.`n$output"
+    }
+    $statsPath = Join-Path $LogDirectory "ccache-stats-$Phase.log"
+    [IO.File]::WriteAllText($statsPath, $output, (New-Object System.Text.UTF8Encoding($false)))
+    $summary = [ordered]@{
+        phase          = $Phase
+        timestamp_utc  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        stats_log      = $statsPath
+    }
+    foreach ($field in @("Hits", "Misses", "Cache size", "Max cache size")) {
+        $match = [regex]::Match($output, "(?m)^\s*" + [regex]::Escape($field) + "\s*:?\s*(.+?)\s*$")
+        if ($match.Success) {
+            $summary[$field] = $match.Groups[1].Value.Trim()
+        }
+    }
+    $summaryText = ($summary.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ", "
+    Write-Host "ccache stats ($Phase): $summaryText"
+    return $summary
+}
+
+function Get-CacheIdentity {
+    $lockPath = Join-Path $SourceDirectory "muse/buildscripts/cmake/deps/dependencies.lock.cmake"
+    if (-not (Test-Path -LiteralPath $lockPath)) {
+        throw "The dependency lock was not found at '$lockPath'; cache keys require it."
+    }
+    $lockSha = (Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $flagsText = ($cacheFlags.GetEnumerator() | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ";"
+    $temp = [IO.Path]::GetTempFileName()
+    try {
+        [IO.File]::WriteAllText($temp, $flagsText, (New-Object System.Text.UTF8Encoding($false)))
+        $flagsSha = (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash.ToLowerInvariant()
+    } finally {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+    }
+
+    $cmakeParts = @("$cmakeVersion".Split("."))
+    $cmakeName = if ($cmakeParts.Count -ge 2) { "$($cmakeParts[0]).$($cmakeParts[1])" } else { "$cmakeVersion" }
+    $moduleToken = (($QtModules -split " ") | Where-Object { $_ } | ForEach-Object { $_ }) -join "-"
+    $sdkVersion = "$($env:WindowsSDKVersion)".TrimEnd([char]0x5C)
+    $identity = [ordered]@{
+        schema            = $CcacheSchema
+        ccache_version    = $DetectedCcacheVersion
+        visual_studio     = "$($visualStudio.InstallationVersion)"
+        vctools_version   = "$($env:VCToolsVersion)"
+        cl_version        = "$clVersion"
+        windows_sdk       = $sdkVersion
+        cmake             = $cmakeName
+        ninja             = $ninjaVersion
+        qt                = $qtVersion
+        qt_modules        = $QtModules
+        lock_sha256       = $lockSha
+        flags_sha256      = $flagsSha
+    }
+    $requiredFields = @(
+        "schema", "ccache_version", "visual_studio", "vctools_version", "cl_version",
+        "windows_sdk", "cmake", "ninja", "qt", "qt_modules", "lock_sha256", "flags_sha256"
+    )
+    $missingFields = @($requiredFields | Where-Object {
+        $value = $identity[$_]
+        $null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)
+    })
+    if ($missingFields.Count -gt 0) {
+        throw "Compiler-cache identity resolved empty fields: $($missingFields -join ', ')."
+    }
+    foreach ($hashField in @("lock_sha256", "flags_sha256")) {
+        if ($identity[$hashField] -notmatch '^[0-9a-f]{64}$') {
+            throw "Compiler-cache identity field '$hashField' is not a lowercase SHA-256."
+        }
+    }
+    $identityBase = "ccache-v$CcacheSchema-win-x64-vs$($identity.visual_studio)-msvc$($identity.vctools_version)-cl$($identity.cl_version)-sdk$sdkVersion-qt$($identity.qt)-modules$moduleToken-cmake$cmakeName-ninja$($identity.ninja)-$BuildType-lock$lockSha-flags$flagsSha-ccache$($identity.ccache_version)"
+    $identity["ccache_key"] = $identityBase
+    $identity["ccache_restore_prefix"] = "$identityBase-"
+    $identity["deps_key"] = "deps-archives-v$CcacheSchema-win-x64-lock$lockSha-schema$CcacheSchema"
+    $identity["qt_cache_prefix"] = "qt-v$CcacheSchema-win-x64-qt$($identity.qt)-modules$moduleToken"
+    $runId = Get-EnvOrNull "GITHUB_RUN_ID"
+    $runAttempt = Get-EnvOrNull "GITHUB_RUN_ATTEMPT"
+    if ($runId -and $runAttempt) {
+        $identity["save_suffix"] = "$runId-$runAttempt"
+        $identity["ccache_save_key"] = "$identityBase-$runId-$runAttempt"
+        $identity["deps_save_key"] = "$($identity['deps_key'])-$runId-$runAttempt"
+    } else {
+        $identity["save_suffix"] = ""
+        $identity["ccache_save_key"] = ""
+        $identity["deps_save_key"] = ""
+    }
+    return $identity
+}
 
 function Get-CompilerCacheLaunchers {
     param([Parameter(Mandatory = $true)][string] $BuildDirectory)
 
-    $pattern = '(^|\s|\\)(ccache|sccache|buildcache)(\.exe)?(\s|$)'
+    $pattern = '(^|\s|[\\/]|["\x27])(ccache|sccache|buildcache)(\.exe)?["\x27]?(?=\s|$)'
     $found = @()
     foreach ($relative in @("build.ninja", "rules.ninja", "CMakeFiles\rules.ninja")) {
         $file = Join-Path $BuildDirectory $relative
@@ -428,6 +594,13 @@ function Get-ApplicationMetadata {
 $SourceDirectory = Get-FullPath $SourceDirectory
 $OutputDirectory = Get-FullPath $OutputDirectory
 $ProvenancePath = Get-FullPath $ProvenancePath
+if ($UseCache) {
+    $CcacheDirectory = Get-FullPath $CcacheDirectory
+    $expectedCcacheDirectory = Get-FullPath (Join-Path $OutputDirectory "ccache")
+    if ($CcacheDirectory -ine $expectedCcacheDirectory) {
+        throw "-CcacheDirectory '$CcacheDirectory' must be the helper-owned '$expectedCcacheDirectory'."
+    }
+}
 
 if (-not (Test-Path -LiteralPath $SourceDirectory -PathType Container)) {
     throw "-SourceDirectory '$SourceDirectory' does not exist."
@@ -580,7 +753,7 @@ if ($env:VSCMD_ARG_TGT_ARCH -ne "x64") {
 }
 
 $clPath = Resolve-Tool -Name "cl.exe"
-$clVersion = (Get-Item -LiteralPath $clPath).VersionInfo.FileVersion
+$clVersion = Get-MsvcCompilerVersion -FilePath $clPath
 Write-Host "cl.exe: $clPath ($clVersion, VCToolsVersion $($env:VCToolsVersion))"
 
 $cmakePath = Resolve-Tool -Name "cmake"
@@ -616,6 +789,7 @@ Write-Host "Qt: $qtRoot ($qtVersion)"
 # ---------------------------------------------------------------------------
 
 Write-Step "Configuring the build environment"
+$cacheMode = if ($UseCache) { "ON" } else { "OFF" }
 $buildEnvironment = [ordered]@{
     MUSESCORE_BUILD_CONFIGURATION             = "app"
     MUSE_APP_BUILD_MODE                       = $Channel
@@ -639,13 +813,71 @@ $buildEnvironment = [ordered]@{
     MUSESCORE_BUILD_PIPEWIRE_AUDIO_DRIVER     = "OFF"
     MUSESCORE_NO_RPATH                        = "OFF"
     MUSESCORE_COMPILE_USE_UNITY               = "ON"
-    MUSESCORE_USE_CCACHE                      = "OFF"
-    MUSE_COMPILE_USE_COMPILER_CACHE          = "OFF"
+    MUSE_COMPILE_USE_PCH                      = "ON"
+    MUSESCORE_MSVC_DEBUG_FORMAT               = "Embedded"
+    MUSESCORE_USE_CCACHE                      = $cacheMode
+    MUSE_COMPILE_USE_COMPILER_CACHE           = $cacheMode
 }
 
 foreach ($entry in $buildEnvironment.GetEnumerator()) {
     [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value)
     Write-Host ("{0,-41}= '{1}'" -f $entry.Key, $entry.Value)
+}
+
+if ($UseCache) {
+    $ccachePath = Assert-Ccache -Directory $CcacheDirectory
+    foreach ($entry in ([ordered]@{
+        CCACHE_DIR        = $CcacheDirectory
+        CCACHE_MAXSIZE    = $CcacheMaxSize
+        CCACHE_BASEDIR    = $SourceDirectory
+        CCACHE_CPP2       = "true"
+        CCACHE_SLOPPINESS = "pch_defines,time_macros"
+    }).GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value)
+    }
+    $null = Invoke-Tool -FilePath $ccachePath -Arguments @("--max-size=$CcacheMaxSize") -Purpose "ccache cache-size configuration"
+    Write-Host "CCACHE_DIR       = '$CcacheDirectory'"
+    Write-Host "CCACHE_MAXSIZE   = '$CcacheMaxSize'"
+    Write-Host "CCACHE_BASEDIR   = '$SourceDirectory'"
+    Write-Host "CCACHE_CPP2      = 'true'"
+    Write-Host "CCACHE_SLOPPINESS= 'pch_defines,time_macros'"
+} else {
+    foreach ($name in @("CCACHE_DIR", "CCACHE_MAXSIZE", "CCACHE_BASEDIR", "CCACHE_CPP2", "CCACHE_SLOPPINESS")) {
+        [Environment]::SetEnvironmentVariable($name, $null)
+    }
+}
+
+# Only compile-affecting settings belong in the compiler-cache namespace. Run
+# identity, build number, install paths and other provenance are intentionally
+# excluded so compatible runs can share objects.
+$cacheFlags = [ordered]@{
+    build_type                              = $BuildType
+    MUSESCORE_BUILD_CONFIGURATION           = $buildEnvironment.MUSESCORE_BUILD_CONFIGURATION
+    MUSE_APP_BUILD_MODE                     = $buildEnvironment.MUSE_APP_BUILD_MODE
+    MUSESCORE_BUILD_CRASHPAD_CLIENT         = $buildEnvironment.MUSESCORE_BUILD_CRASHPAD_CLIENT
+    MUSESCORE_CRASHREPORT_URL               = $buildEnvironment.MUSESCORE_CRASHREPORT_URL
+    MUSESCORE_MODULE_UPDATE                 = $buildEnvironment.MUSESCORE_MODULE_UPDATE
+    MUSESCORE_BUILD_UNIT_TESTS              = $buildEnvironment.MUSESCORE_BUILD_UNIT_TESTS
+    MUSESCORE_UNIT_TESTS_ENABLE_CODE_COVERAGE = $buildEnvironment.MUSESCORE_UNIT_TESTS_ENABLE_CODE_COVERAGE
+    MUSESCORE_BUILD_VST_MODULE              = $buildEnvironment.MUSESCORE_BUILD_VST_MODULE
+    MUSESCORE_BUILD_WEBSOCKET               = $buildEnvironment.MUSESCORE_BUILD_WEBSOCKET
+    MUSE_MODULE_AUDIO_EXPORT                = $buildEnvironment.MUSE_MODULE_AUDIO_EXPORT
+    MUSE_MODULE_AUDIO_ASIO                  = $buildEnvironment.MUSE_MODULE_AUDIO_ASIO
+    MUSESCORE_NO_RPATH                        = $buildEnvironment.MUSESCORE_NO_RPATH
+    MUSESCORE_COMPILE_USE_UNITY               = $buildEnvironment.MUSESCORE_COMPILE_USE_UNITY
+    MUSE_COMPILE_USE_PCH                      = $buildEnvironment.MUSE_COMPILE_USE_PCH
+    MUSESCORE_MSVC_DEBUG_FORMAT             = $buildEnvironment.MUSESCORE_MSVC_DEBUG_FORMAT
+    MUSESCORE_USE_CCACHE                    = $buildEnvironment.MUSESCORE_USE_CCACHE
+    MUSE_COMPILE_USE_COMPILER_CACHE         = $buildEnvironment.MUSE_COMPILE_USE_COMPILER_CACHE
+}
+
+$cacheIdentity = if ($UseCache) { Get-CacheIdentity } else { [ordered]@{} }
+if ($CacheIdentityOnly) {
+    if (-not $UseCache) {
+        throw "-CacheIdentityOnly requires -UseCache so the identity describes the actual ccache toolchain."
+    }
+    Write-Output ($cacheIdentity | ConvertTo-Json -Compress)
+    exit 0
 }
 
 New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
@@ -654,9 +886,16 @@ New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
 # diagnosed from the uploaded diagnostics instead of the (eventually expiring) run log.
 $hostResources = @(
     "logical_processors: $([Environment]::ProcessorCount)"
+    "chosen_jobs: $Jobs"
     "process_working_set_bytes: $([System.Diagnostics.Process]::GetCurrentProcess().WorkingSet64)"
     "runner_image: $($env:ImageOS) $($env:ImageVersion)"
 )
+try {
+    $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop
+    $hostResources += "total_physical_memory_bytes: $($computerSystem.TotalPhysicalMemory)"
+} catch {
+    $hostResources += "total_physical_memory_bytes: unavailable ($($_.Exception.Message))"
+}
 try {
     $drive = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -ieq [IO.Path]::GetPathRoot($OutputDirectory) } | Select-Object -First 1
     if ($drive) {
@@ -686,12 +925,25 @@ $driverArguments += @("-File", $DriverPath, "-t", $DriverTarget, "-j", "$Jobs")
 
 $driverCommand = "> $driverHost $($driverArguments -join ' ')"
 Write-Host $driverCommand
-Push-Location $SourceDirectory
+$driverExitCode = 1
+$buildStopwatch = [Diagnostics.Stopwatch]::StartNew()
 try {
-    & $driverHost @driverArguments 2>&1 | Tee-Object -FilePath $DriverLogPath
-    $driverExitCode = $LASTEXITCODE
+    if ($UseCache) {
+        $ccacheStatsSummary["before"] = Write-CcacheStats -Phase "before"
+    }
+    Push-Location $SourceDirectory
+    try {
+        & $driverHost @driverArguments 2>&1 | Tee-Object -FilePath $DriverLogPath
+        $driverExitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
 } finally {
-    Pop-Location
+    $buildStopwatch.Stop()
+    if ($UseCache) {
+        $ccacheStatsSummary["after"] = Write-CcacheStats -Phase "after"
+        $ccacheStatsSummary["build_elapsed_seconds"] = [math]::Round($buildStopwatch.Elapsed.TotalSeconds, 3)
+    }
 }
 if ($driverExitCode -ne 0) {
     throw "The build driver failed with exit code $driverExitCode. Command: $driverCommand. Log: $DriverLogPath"
@@ -723,7 +975,8 @@ $expectedOn = @(
     "MUSE_MODULE_NETWORK_WEBSOCKET",
     "MUSE_MODULE_ACCESSIBILITY",
     "MUE_BUILD_BRAILLE_MODULE",
-    "MUSE_COMPILE_USE_UNITY"
+    "MUSE_COMPILE_USE_UNITY",
+    "MUSE_COMPILE_USE_PCH"
 )
 $expectedOff = @(
     "MUE_DOWNLOAD_SOUNDFONT",                    # source-pinned soundfont, no network refresh
@@ -743,21 +996,41 @@ foreach ($key in $expectedOn) {
 foreach ($key in $expectedOff) {
     $features[$key] = Assert-CacheValue -Cache $cache -Key $key -Expected "OFF"
 }
-# Absent only when a source ref predates the explicit cache-off control in
-# ninja_build.ps1; the launcher checks below still enforce the contract.
-$features["MUSE_COMPILE_USE_COMPILER_CACHE"] = Assert-CacheValue -Cache $cache -Key "MUSE_COMPILE_USE_COMPILER_CACHE" -Expected "OFF" -Required $false
+$expectedCacheMode = if ($UseCache) { "ON" } else { "OFF" }
+$features["MUSE_COMPILE_USE_COMPILER_CACHE"] = Assert-CacheValue -Cache $cache -Key "MUSE_COMPILE_USE_COMPILER_CACHE" -Expected $expectedCacheMode
 
 $cacheLaunchers = @(Get-CompilerCacheLaunchers -BuildDirectory $BuildDirectory)
-if ($cacheLaunchers.Count -gt 0) {
-    throw "A compiler cache launcher is present in the generated Ninja files ($($cacheLaunchers -join ', ')) although MUSESCORE_USE_CCACHE=OFF."
-}
-foreach ($launcherKey in @("CMAKE_C_COMPILER_LAUNCHER", "CMAKE_CXX_COMPILER_LAUNCHER")) {
-    if ($cache.ContainsKey($launcherKey) -and $cache[$launcherKey]) {
-        throw "CMakeCache entry '$launcherKey' is '$($cache[$launcherKey])' although the compiler cache is disabled."
+if ($UseCache) {
+    if ($cacheLaunchers.Count -eq 0) {
+        throw "Compiler caching was enabled but no ccache launcher was present in the generated Ninja files."
+    }
+    foreach ($relative in $cacheLaunchers) {
+        $file = Join-Path $BuildDirectory $relative
+        if (-not (Select-String -LiteralPath $file -Pattern 'ccache(\.exe)?' -Quiet)) {
+            throw "The generated Ninja file '$relative' uses a compiler cache other than the pinned ccache."
+        }
+    }
+    foreach ($launcherKey in @("CMAKE_C_COMPILER_LAUNCHER", "CMAKE_CXX_COMPILER_LAUNCHER")) {
+        if (-not $cache.ContainsKey($launcherKey) -or $cache[$launcherKey] -notmatch '(?i)(^|[\\/])ccache(\.exe)?$') {
+            throw "CMakeCache entry '$launcherKey' does not point to the pinned ccache launcher."
+        }
+    }
+} else {
+    if ($cacheLaunchers.Count -gt 0) {
+        throw "A compiler cache launcher is present in the generated Ninja files ($($cacheLaunchers -join ', ')) although MUSESCORE_USE_CCACHE=OFF."
+    }
+    foreach ($launcherKey in @("CMAKE_C_COMPILER_LAUNCHER", "CMAKE_CXX_COMPILER_LAUNCHER")) {
+        if ($cache.ContainsKey($launcherKey) -and $cache[$launcherKey]) {
+            throw "CMakeCache entry '$launcherKey' is '$($cache[$launcherKey])' although the compiler cache is disabled."
+        }
     }
 }
 $features.GetEnumerator() | ForEach-Object { Write-Host ("{0,-41}= {1}" -f $_.Key, $(if ($null -eq $_.Value) { "<absent>" } else { $_.Value })) }
-Write-Host "compiler cache launchers in Ninja files: none"
+if ($UseCache) {
+    Write-Host "compiler cache launchers in Ninja files: $($cacheLaunchers -join ', ')"
+} else {
+    Write-Host "compiler cache launchers in Ninja files: none"
+}
 
 Write-Step "Verifying the install tree"
 $resources = Assert-InstallLayout -InstallDirectory $InstallDirectory -ExecutableRelative $application.ExecutableRelative
@@ -768,6 +1041,19 @@ $resources.GetEnumerator() | ForEach-Object { Write-Host ("{0,-19}: {1}" -f $_.K
 # ---------------------------------------------------------------------------
 
 $driverFile = Get-Item -LiteralPath $DriverPath
+$compilerCache = [ordered]@{
+    enabled                         = [bool]$UseCache
+    effective_use_cache             = [bool]$UseCache
+    directory                       = if ($UseCache) { $CcacheDirectory } else { $null }
+    max_size                        = if ($UseCache) { $CcacheMaxSize } else { $null }
+    version                         = if ($UseCache) { $DetectedCcacheVersion } else { $null }
+    identity                        = $cacheIdentity
+    ccache_cache_matched_key        = Get-EnvOrNull "CCACHE_CACHE_MATCHED_KEY"
+    dependency_cache_matched_key    = Get-EnvOrNull "DEPS_CACHE_MATCHED_KEY"
+    qt_cache_key_prefix             = if (Get-EnvOrNull "QT_CACHE_KEY_PREFIX") { Get-EnvOrNull "QT_CACHE_KEY_PREFIX" } elseif ($UseCache) { $cacheIdentity["qt_cache_prefix"] } else { $null }
+    stats                           = $ccacheStatsSummary
+    launchers_in_ninja_files        = $cacheLaunchers
+}
 $resolvedIdentity = [ordered]@{
     repository           = (Get-EnvOrNull "GITHUB_REPOSITORY")
     requested_source_ref = $SourceRef
@@ -787,7 +1073,7 @@ $buildValues = [ordered]@{
     architecture             = $Architecture
     build_type               = $BuildType
     features                 = $features
-    compiler_cache           = [ordered]@{ enabled = $false; launchers_in_ninja_files = @() }
+    compiler_cache           = $compilerCache
     toolchain                = [ordered]@{
         visual_studio = $visualStudio
         msvc          = [ordered]@{ compiler_path = $clPath; compiler_version = "$clVersion"; tools_version = "$($env:VCToolsVersion)" }

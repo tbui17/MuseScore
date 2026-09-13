@@ -20,9 +20,9 @@ on:
         type: string
         default: ''
       use_cache:
-        description: Enable compatible caches (refused until the cold hosted build is qualified)
+        description: Enable compatible Qt, dependency-archive and compiler-object caches on trusted runs
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -50,6 +50,7 @@ jobs:
       framework_url: ${{ steps.source.outputs.framework_url }}
       workflow_sha: ${{ steps.source.outputs.workflow_sha }}
       requested_source_ref: ${{ steps.source.outputs.requested_source_ref }}
+      effective_use_cache: ${{ steps.source.outputs.effective_use_cache }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -126,7 +127,114 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           modules: qt5compat qtnetworkauth qtshadertools qtwebsockets
-          cache: false
+          cache-key-prefix: qt-v1-win-x64-qt6.10.2-modules-qt5compat-qtnetworkauth-qtshadertools-qtwebsockets
+          cache: ${{ needs.preflight.outputs.effective_use_cache == 'true' }}
+      - name: Prove native build failure propagation
+        working-directory: pipeline
+        shell: pwsh
+        env:
+          MUSE_FORK_REQUIRE_NATIVE_TOOLCHAIN: "1"
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          if (-not (Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version -eq [version]'5.7.1' })) {
+            Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          }
+          Import-Module Pester -RequiredVersion 5.7.1
+          $result = Invoke-Pester -Path buildscripts/ci/fork/tests/windows-build.tests.ps1 -CI -Output Detailed -PassThru
+          if ($result.TotalCount -le 0) { throw "windows-build Pester discovery returned no tests" }
+          if ($result.FailedCount -gt 0) { throw "$($result.FailedCount) windows-build test(s) failed" }
+          if ($result.SkippedCount -gt 0) { throw "$($result.SkippedCount) windows-build test(s) were skipped although the hosted toolchain must be present" }
+      - name: Provision pinned ccache
+        if: needs.preflight.outputs.effective_use_cache == 'true'
+        shell: pwsh
+        env:
+          CCACHE_URL: https://github.com/ccache/ccache/releases/download/v4.13.6/ccache-4.13.6-windows-x86_64.zip
+          CCACHE_SHA256: 3d7cebb05850ad704e197b3f1d3f0f924ab6c9fdfc561578e146184fe9d89380
+          CCACHE_VERSION: 4.13.6
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "ccache-$env:CCACHE_VERSION-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.zip"
+          Invoke-WebRequest -Uri $env:CCACHE_URL -OutFile $archive
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:CCACHE_SHA256) {
+            throw "ccache archive SHA-256 mismatch: expected $env:CCACHE_SHA256, got $actual"
+          }
+          $extract = Join-Path $env:RUNNER_TEMP "ccache-$env:CCACHE_VERSION-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $bin = Join-Path $extract "ccache-$env:CCACHE_VERSION-windows-x86_64"
+          $ccache = Join-Path $bin "ccache.exe"
+          if (-not (Test-Path -LiteralPath $ccache -PathType Leaf)) {
+            throw "Pinned ccache archive did not contain $ccache"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          $reported = (& $ccache --version 2>&1 | Select-Object -First 1)
+          if ($LASTEXITCODE -ne 0 -or $reported -notmatch "ccache.*$env:CCACHE_VERSION") {
+            throw "Pinned ccache reported an unexpected version: $reported"
+          }
+          Write-Host "Pinned ccache $reported from verified $archive"
+      - name: Resolve cache identity from native toolchain
+        id: cache_identity
+        if: needs.preflight.outputs.effective_use_cache == 'true'
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.preflight.outputs.requested_source_ref }}
+          WORKFLOW_SHA: ${{ needs.preflight.outputs.workflow_sha }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          $helper = "./pipeline/buildscripts/ci/fork/windows-build.ps1"
+          $helperArgs = @(
+            "-SourceDirectory", "./source",
+            "-OutputDirectory", "./build-output",
+            "-ProvenancePath", "./provenance/provenance.json",
+            "-SourceSha", $env:SOURCE_SHA,
+            "-SourceRef", $env:SOURCE_REF,
+            "-BuildNumber", $env:BUILD_NUMBER,
+            "-UseCache",
+            "-CcacheDirectory", "./build-output/ccache",
+            "-CacheIdentityOnly"
+          )
+          $json = & $helper @helperArgs | Select-Object -Last 1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cache identity helper failed with exit code $LASTEXITCODE"
+          }
+          $identity = $json | ConvertFrom-Json
+          foreach ($name in @("ccache_key", "ccache_restore_prefix", "deps_key", "qt_cache_prefix")) {
+            $value = [string]$identity.$name
+            if ([string]::IsNullOrWhiteSpace($value)) {
+              throw "Cache identity did not provide '$name'"
+            }
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "$name=$value"
+          }
+      - name: Restore compiler object cache
+        id: ccache_cache
+        if: needs.preflight.outputs.effective_use_cache == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: build-output/ccache
+          key: ${{ steps.cache_identity.outputs.ccache_key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ steps.cache_identity.outputs.ccache_restore_prefix }}
+      - name: Restore verified dependency archives
+        id: deps_cache
+        if: needs.preflight.outputs.effective_use_cache == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            source/build.release/_deps/**/.pinned/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]
+          key: ${{ steps.cache_identity.outputs.deps_key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ steps.cache_identity.outputs.deps_key }}-
+      - name: Record cache restore provenance
+        if: needs.preflight.outputs.effective_use_cache == 'true'
+        shell: pwsh
+        env:
+          CCACHE_CACHE_MATCHED_KEY: ${{ steps.ccache_cache.outputs.cache-matched-key }}
+          DEPS_CACHE_MATCHED_KEY: ${{ steps.deps_cache.outputs.cache-matched-key }}
+          QT_CACHE_KEY_PREFIX: qt-v1-win-x64-qt6.10.2-modules-qt5compat-qtnetworkauth-qtshadertools-qtwebsockets
+        run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "CCACHE_CACHE_MATCHED_KEY=$env:CCACHE_CACHE_MATCHED_KEY"
+          Add-Content -Path $env:GITHUB_ENV -Value "DEPS_CACHE_MATCHED_KEY=$env:DEPS_CACHE_MATCHED_KEY"
+          Add-Content -Path $env:GITHUB_ENV -Value "QT_CACHE_KEY_PREFIX=$env:QT_CACHE_KEY_PREFIX"
       - name: Full desktop configure, compile and install
         shell: pwsh
         env:
@@ -134,7 +242,38 @@ jobs:
           SOURCE_REF: ${{ needs.preflight.outputs.requested_source_ref }}
           WORKFLOW_SHA: ${{ needs.preflight.outputs.workflow_sha }}
           BUILD_NUMBER: ${{ github.run_number }}
-        run: ./pipeline/buildscripts/ci/fork/windows-build.ps1 -SourceDirectory ./source -OutputDirectory ./build-output -ProvenancePath ./provenance/provenance.json -SourceSha $env:SOURCE_SHA -SourceRef $env:SOURCE_REF -BuildNumber $env:BUILD_NUMBER
+        run: |
+          $helperArgs = @(
+            "-SourceDirectory", "./source",
+            "-OutputDirectory", "./build-output",
+            "-ProvenancePath", "./provenance/provenance.json",
+            "-SourceSha", $env:SOURCE_SHA,
+            "-SourceRef", $env:SOURCE_REF,
+            "-BuildNumber", $env:BUILD_NUMBER
+          )
+          if ("${{ needs.preflight.outputs.effective_use_cache }}" -eq "true") {
+            $helperArgs += @("-UseCache", "-CcacheDirectory", "./build-output/ccache")
+          }
+          & ./pipeline/buildscripts/ci/fork/windows-build.ps1 @helperArgs
+      - name: Save compiler object cache
+        if: >-
+          needs.preflight.outputs.effective_use_cache == 'true' &&
+          success() &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@v4
+        with:
+          path: build-output/ccache
+          key: ${{ steps.cache_identity.outputs.ccache_key }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save verified dependency archives
+        if: >-
+          needs.preflight.outputs.effective_use_cache == 'true' &&
+          success() &&
+          (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            source/build.release/_deps/**/.pinned/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]
+          key: ${{ steps.cache_identity.outputs.deps_key }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Validate and archive installed application
         shell: pwsh
         run: ./pipeline/buildscripts/ci/fork/package-windows.ps1 -SourceDirectory ./source -InstallDirectory ./build-output/install -OutputDirectory ./package -ProvenancePath ./provenance/provenance.json
@@ -195,6 +334,7 @@ jobs:
             /version.cmake
             /share/testflowscripts/TC11_CommandPaletteDialog.js
             /share/testflowscripts/TC14_CommandPaletteAnnounce.js
+            /share/testflowscripts/TC15_RegionEntryAnnounce.js
             /vtest/scores/layout-5.mscx
           sparse-checkout-cone-mode: false
           persist-credentials: false
