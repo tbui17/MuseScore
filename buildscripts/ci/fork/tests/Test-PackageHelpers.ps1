@@ -140,7 +140,10 @@ function Invoke-ProfilePlan {
 }
 
 function New-FakeSource {
-    param([Parameter(Mandatory = $true)][string] $Root)
+    param(
+        [Parameter(Mandatory = $true)][string] $Root,
+        [switch] $IncludeFeatureTest
+    )
 
     New-Item -ItemType Directory -Path $Root -Force | Out-Null
     [IO.File]::WriteAllText((Join-Path $Root 'version.cmake'), @'
@@ -170,6 +173,25 @@ function main()
 }
 "@
         [IO.File]::WriteAllText((Join-Path $scriptsDir $fixtureName), $scriptText, [Text.UTF8Encoding]::new($false))
+    }
+
+    if ($IncludeFeatureTest) {
+        $fixtureCase = $script:FeatureFixtureCase
+        $stepEntries = @($fixtureCase.Steps | ForEach-Object { "        {name: `"$_`", func: function() {}}" })
+        $scriptText = @"
+var testCase = {
+    name: "$($fixtureCase.Name)",
+    description: "feature fixture shape, not a GUI assertion",
+    steps: [
+$($stepEntries -join ",`n")
+    ]
+};
+function main()
+{
+    api.testflow.runTestCase(testCase)
+}
+"@
+        [IO.File]::WriteAllText((Join-Path $scriptsDir $script:FeatureFixtureName), $scriptText, [Text.UTF8Encoding]::new($false))
     }
 
     $fixtureDir = Join-Path $Root 'vtest/scores'
@@ -296,6 +318,24 @@ $script:FixtureTestCases = [ordered]@{
         Name  = 'TC14: fixture command palette announcement'
         Steps = @('Open command palette', 'Navigate and announce a result')
     }
+}
+
+# The feature fixture mirrors the reviewed TC15 shape so the runtime-selection and missing-install
+# regressions can run without pretending that a POSIX stub is evidence for a real GUI binary.
+$script:FeatureFixtureName = 'TC15_RegionEntryAnnounce.js'
+$script:FeatureFixtureCase = @{
+    Name  = 'TC15: Region entry announces score view on focus'
+    Steps = @(
+        'Close score (if opened) and go to home to start'
+        'Open New Score Dialog'
+        'Select Instruments'
+        'Create score'
+        'Wait for notation page to settle'
+        "Verify 'Score view' was announced on score open"
+        'Tab to status bar — should NOT re-announce ''Score view'''
+        "Return to score canvas — should announce 'Score view'"
+        "F6 to next section — should NOT re-announce 'Score view'"
+    )
 }
 
 $script:StubTemplate = @'
@@ -514,7 +554,6 @@ trailer<<>>
         $placeholder = ($scriptFileName -replace '_CommandPalette.*', '') + '_REPORT'
         $stub = $stub.Replace($placeholder, (New-TestflowStubReport -ScriptFileName $scriptFileName -ReportMode $ReportMode))
     }
-
     return $stub
 }
 
@@ -530,14 +569,17 @@ function New-FakePackage {
         Produces a valid package directory (zip + SHA256SUMS.txt + manifest) from a
         fresh synthetic install tree. Returns a hashtable with the paths.
     #>
-    param([Parameter(Mandatory = $true)][string] $Root)
+    param(
+        [Parameter(Mandatory = $true)][string] $Root,
+        [switch] $IncludeFeatureTest
+    )
 
     $source = Join-Path $Root 'source'
     $install = Join-Path $Root 'install'
     $artifact = Join-Path $Root 'artifact'
     New-Item -ItemType Directory -Path $artifact -Force | Out-Null
 
-    $head = New-FakeSource -Root $source
+    $head = New-FakeSource -Root $source -IncludeFeatureTest:$IncludeFeatureTest
     $expectations = Get-ResourceExpectations
     New-FakeInstall -Root $install -Expectations $expectations -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
 
@@ -1021,6 +1063,36 @@ try {
             Assert-True ($result.Output -match 'does not contain the installed test script') "unexpected error text: $($result.Output)"
         }
 
+        Invoke-Case 'runtime: source-present TC15 missing installed script fails' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-missing-feature-test') -IncludeFeatureTest
+            $packagePath = $package.Package.FullName
+            $missingPath = "testflowscripts/$($script:FeatureFixtureName)"
+            $archive = [System.IO.Compression.ZipFile]::Open($packagePath, [System.IO.Compression.ZipArchiveMode]::Update)
+            try {
+                $entries = @($archive.Entries | Where-Object { $_.FullName -eq $missingPath })
+                Assert-True ($entries.Count -eq 1) "feature fixture package must contain exactly one '$missingPath' entry"
+                $entries[0].Delete()
+            } finally {
+                $archive.Dispose()
+            }
+            $newSize = (Get-Item -LiteralPath $packagePath).Length
+            $newSha = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $manifestPath = Join-Path $package.Artifact 'build-manifest.json'
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $manifest.package.size = $newSize
+            $manifest.package.sha256 = $newSha
+            [IO.File]::WriteAllText($manifestPath, (ConvertTo-Json -InputObject $manifest -Depth 10), [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText((Join-Path $package.Artifact 'SHA256SUMS.txt'), "$newSha  $($package.Package.Name)`n", [Text.UTF8Encoding]::new($false))
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-missing-feature-test-out'),
+                '-VersionTimeoutSeconds', '10', '-ExportTimeoutSeconds', '10', '-GuiTimeoutSeconds', '10')
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the selected TC15 script is absent from the package'
+            Assert-True ($result.Output -match [regex]::Escape("does not contain the installed test script $missingPath")) `
+                "unexpected error text: $($result.Output)"
+        }
+
         Invoke-Case 'runtime: --version with no output is not a pass' {
             $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-version-silent')
             $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
@@ -1099,6 +1171,9 @@ try {
             Assert-True ($names -contains 'export-mscz') 'report must include the score container export'
             Assert-True ($names -contains 'TC11_CommandPaletteDialog.js') 'report must include TC11'
             Assert-True ($names -contains 'TC14_CommandPaletteAnnounce.js') 'report must include TC14'
+            $guiNames = @($names | Where-Object { $_ -like 'TC*.js' })
+            Assert-True ($guiNames.Count -eq 2) "base source fixture must select exactly TC11/TC14, found: $($guiNames -join ', ')"
+            Assert-True ($guiNames -notcontains $script:FeatureFixtureName) 'base source fixture must not select TC15'
             Assert-True (Test-Path -LiteralPath (Join-Path $WorkRoot 'rt-ok-out/logs/export-pdf.stdout.log')) 'PDF export output must be retained for diagnosis'
         }
 

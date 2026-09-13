@@ -12,8 +12,9 @@
 #   3. bounded headless exports through the revision's `-o` converter path: a PDF
 #      (exercises layout, rendering and font embedding) and a score container
 #      (MSCZ opened as a ZIP and required to carry the score XML)
-#   4. GUI testflow TC11 + TC14 through `--test-case-gui`: the reviewed script from the
-#      source checkout must be present, the run must exit 0, and it must leave exactly one
+#   4. GUI testflow: mandatory TC11 + TC14, and exact feature TC15 when its source fixture is
+#      present, through `--test-case-gui`: the reviewed script from the source checkout
+#      must be present, the run must exit 0, and it must leave exactly one
 #      testflow report under the helper-owned MUSE_TESTFLOW_DATA_PATH whose declared test
 #      case name and step list match the reviewed script and in which every declared step
 #      finished
@@ -66,10 +67,15 @@ $script:IsWindowsHost = ($env:OS -eq 'Windows_NT')
 $script:Failures = @()
 $script:Results = @()
 
-$script:RequiredTestScripts = @(
+$script:MandatoryTestScripts = @(
     'TC11_CommandPaletteDialog.js'
     'TC14_CommandPaletteAnnounce.js'
 )
+# TC15 is a reviewed feature test, not part of the base CI contract. It is selected only when
+# this exact source fixture is present in the source checkout; no source-owned list or glob can
+# opt arbitrary tests into the runtime gate.
+$script:FeatureTestScriptName = 'TC15_RegionEntryAnnounce.js'
+$script:RequiredTestScripts = @()
 
 # The testflow runner records each executed test case under
 # <MUSE_TESTFLOW_DATA_PATH>/reports. Pointing that at the helper's own output directory
@@ -834,6 +840,17 @@ if ($ExportProfilePlan) {
 # ---------------------------------------------------------------------------
 $artifactRoot = Resolve-RequiredDirectory -Path $ArtifactDirectory -Name 'ArtifactDirectory'
 $sourceRoot = Resolve-RequiredDirectory -Path $SourceDirectory -Name 'SourceDirectory'
+# TC11 and TC14 are mandatory for every package. Select the one reviewed feature case only when
+# its exact sparse fixture is present; a base checkout therefore remains a two-case run, while a
+# feature checkout cannot silently omit the installed counterpart.
+$script:RequiredTestScripts = @($script:MandatoryTestScripts)
+$featureSourceScript = Join-Path $sourceRoot (Join-Path 'share/testflowscripts' $script:FeatureTestScriptName)
+if (Test-Path -LiteralPath $featureSourceScript -PathType Leaf) {
+    $script:RequiredTestScripts += $script:FeatureTestScriptName
+    Write-Host "selected feature GUI test from exact source fixture: share/testflowscripts/$($script:FeatureTestScriptName)"
+} else {
+    Write-Host "feature GUI test not selected; exact source fixture is absent: share/testflowscripts/$($script:FeatureTestScriptName)"
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     Fail '-OutputDirectory is required'
@@ -1198,7 +1215,7 @@ if ($null -eq $fixture) {
 }
 
 # ---------------------------------------------------------------------------
-# 3. GUI testflow: TC11 + TC14
+# 3. GUI testflow: mandatory TC11 + TC14, plus the exact TC15 feature fixture when present
 # ---------------------------------------------------------------------------
 Write-Section 'GUI testflow regression tests'
 foreach ($scriptName in $script:RequiredTestScripts) {
