@@ -234,7 +234,9 @@ include(SetupDependencies)
 # The application license ships inside the install tree. Every other notice is installed
 # next to it by the framework's buildscripts/cmake/SetupLicenseNotices.cmake, which reads
 # the pinned payloads; the packaging helpers require the whole licenses/ set.
-install(FILES LICENSE.txt DESTINATION ${MUSE_APP_INSTALL_RESOURCES_LOCATION}/licenses)
+set(_license_destination "${MUSE_APP_INSTALL_RESOURCES_LOCATION}/licenses")
+cmake_path(NORMAL_PATH _license_destination)
+install(FILES LICENSE.txt DESTINATION "${_license_destination}")
 
 ###########################################
 # Add source tree

@@ -105,27 +105,77 @@ function Get-CoreResourceExpectation {
             description = 'Bundled soundfont (share/sound/CMakeLists.txt, MUE_INSTALL_SOUNDFONT)' }
         @{ kind = 'file'; path = 'sound/MS Basic_License.md'
             description = 'Bundled soundfont license notice' }
-        @{ kind = 'dirhas'; path = 'licenses/qt-attribution'
-            description = 'Qt attribution metadata of the shipped modules (SetupLicenseNotices.cmake, from the installed kit)' }
         @{ kind = 'file'; path = 'licenses/LICENSE.txt'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/SOURCE-REFS.txt'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
-        @{ kind = 'file'; path = 'licenses/qt/GPL-3.0-only.txt'
-            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
-        @{ kind = 'file'; path = 'licenses/qt/LGPL-3.0-only.txt'
-            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
-        @{ kind = 'file'; path = 'licenses/qt/Qt-GPL-exception-1.0.txt'
-            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/LICENSES/LGPL-3.0-only.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/LICENSES/GPL-3.0-only.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/LICENSES/Qt-GPL-exception-1.0.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/src/dbus/LICENSE.LIBDBUS-1.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/src/3rdparty/freetype/LICENSE.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/src/3rdparty/harfbuzz-ng/COPYING'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/src/3rdparty/libpng/LICENSE'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/src/3rdparty/zlib/LICENSE'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtdeclarative/src/3rdparty/yoga/LICENSE'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtsvg/src/svg/LICENSE.XSVG.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qttools/src/assistant/qlitehtml/src/3rdparty/litehtml/LICENSE'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qttools/src/qdoc/catch/LICENSE.CATCH.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qt5compat/src/core5/codecs/LICENSE.QBIG5CODEC.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtshadertools/src/3rdparty/glslang/LICENSE.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtshadertools/src/3rdparty/SPIRV-Cross/LICENSE'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtnetworkauth/LICENSES/BSD-3-Clause.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qttranslations/LICENSES/GPL-3.0-only.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtwebsockets/LICENSES/LGPL-3.0-only.txt'
+            description = 'Qt module notice or attribution from the pinned Qt source archive (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/src/3rdparty/pcre2/LICENCE.md'
+            description = 'Qt module legal file referenced by qt_attribution.json (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qtbase/src/3rdparty/libjpeg/COPYRIGHT.txt'
+            description = 'Qt module legal file referenced by qt_attribution.json (SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt-libraries/qttools/src/assistant/qlitehtml/src/3rdparty/GUMBO-AUTHORS.txt'
+            description = 'Qt module legal file referenced by qt_attribution.json (SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/fdk-aac/NOTICE'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/asiosdk/LICENSE.txt'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/asiosdk/common/LICENSE.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/asiosdk/Steinberg ASIO Licensing Agreement.pdf'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/harfbuzz/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/harfbuzz/src/ms-use/COPYING'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/kddockwidgets/LICENSE.txt'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/kddockwidgets/LICENSE.GPL.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/kddockwidgets/LICENSES/GPL-2.0-only.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/kddockwidgets/LICENSES/GPL-3.0-only.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/vst3sdk/base/LICENSE.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/vst3sdk/pluginterfaces/LICENSE.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/vst3sdk/public.sdk/LICENSE.txt'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/zlib/README'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
@@ -139,7 +189,15 @@ function Get-CoreResourceExpectation {
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/lame/COPYING'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/lame/LICENSE'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/flac/COPYING.Xiph'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/flac/COPYING.LGPL'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/flac/COPYING.GPL'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/flac/COPYING.FDL'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/opus/COPYING'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
@@ -155,7 +213,11 @@ function Get-CoreResourceExpectation {
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/picojson/picojson.h'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/liblouis/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/liblouis/COPYING.LESSER'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/liblouis/License.md'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/intervaltree/LICENSE'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
@@ -167,6 +229,18 @@ function Get-CoreResourceExpectation {
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'licenses/fonts/bravura/OFL.txt'
             description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/freefont/COPYING'
+            description = 'GNU FreeFont GPL-3.0 text and font exception (pinned FreeFont 20120503 release)' }
+        @{ kind = 'file'; path = 'licenses/freefont/README'
+            description = 'GNU FreeFont font exception notice (pinned FreeFont 20120503 release)' }
+        @{ kind = 'file'; path = 'licenses/freefont/AUTHORS'
+            description = 'GNU FreeFont attribution (pinned FreeFont 20120503 release)' }
+        @{ kind = 'file'; path = 'licenses/mnxdom/LICENSE'
+            description = 'mnxdom MIT license from the fetched tree at the pinned commit e7c947bf768caccf315426dcae0dfac02caf738b' }
+        @{ kind = 'file'; path = 'licenses/libmei/internal/libmei.h'
+            description = 'Copyright statement of the vendored libmei generated sources (MuseScore repository)' }
+        @{ kind = 'file'; path = 'licenses/libmei/thirdparty/libmei/attclasses.h'
+            description = 'Copyright statement of the vendored libmei generated sources (MuseScore repository)' }
         @{ kind = 'file'; path = 'styles/MuseJazz.mss'; description = 'Bundled style' }
         @{ kind = 'file'; path = 'templates/My_First_Score.mscx'; description = 'Bundled score template' }
         @{ kind = 'dirhas'; path = 'wallpapers'; filter = '*.png'

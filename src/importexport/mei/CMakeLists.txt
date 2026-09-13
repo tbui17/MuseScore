@@ -20,6 +20,14 @@
 
 muse_create_module(iex_mei)
 
+# The vendored libmei sources are MuseScore's own generated code (Verovio libmei generator);
+# they live in this repository under its GPL-3.0 license and carry the copyright statement
+# "Copyright (c) Authors and others" plus the generator attribution. No upstream revision is
+# recorded in the checkout, so the copyright-bearing files are installed verbatim.
+include(SetupLicenseNotices)
+muse_install_license_notice(libmei "${CMAKE_CURRENT_LIST_DIR}"
+    "internal/libmei.h" "thirdparty/libmei/attclasses.h")
+
 target_sources(iex_mei PRIVATE
     imeiconfiguration.h
     meimodule.cpp

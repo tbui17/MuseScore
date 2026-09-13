@@ -280,21 +280,51 @@ function Assert-InstallLayout {
     $noticeFiles = @(
         "licenses/LICENSE.txt"
         "licenses/SOURCE-REFS.txt"
-        "licenses/qt/GPL-3.0-only.txt"
-        "licenses/qt/LGPL-3.0-only.txt"
-        "licenses/qt/Qt-GPL-exception-1.0.txt"
+        "licenses/qt-libraries/qtbase/LICENSES/LGPL-3.0-only.txt"
+        "licenses/qt-libraries/qtbase/LICENSES/GPL-3.0-only.txt"
+        "licenses/qt-libraries/qtbase/LICENSES/Qt-GPL-exception-1.0.txt"
+        "licenses/qt-libraries/qtbase/src/dbus/LICENSE.LIBDBUS-1.txt"
+        "licenses/qt-libraries/qtbase/src/3rdparty/freetype/LICENSE.txt"
+        "licenses/qt-libraries/qtbase/src/3rdparty/harfbuzz-ng/COPYING"
+        "licenses/qt-libraries/qtbase/src/3rdparty/libpng/LICENSE"
+        "licenses/qt-libraries/qtbase/src/3rdparty/zlib/LICENSE"
+        "licenses/qt-libraries/qtdeclarative/src/3rdparty/yoga/LICENSE"
+        "licenses/qt-libraries/qtsvg/src/svg/LICENSE.XSVG.txt"
+        "licenses/qt-libraries/qttools/src/assistant/qlitehtml/src/3rdparty/litehtml/LICENSE"
+        "licenses/qt-libraries/qttools/src/qdoc/catch/LICENSE.CATCH.txt"
+        "licenses/qt-libraries/qt5compat/src/core5/codecs/LICENSE.QBIG5CODEC.txt"
+        "licenses/qt-libraries/qtshadertools/src/3rdparty/glslang/LICENSE.txt"
+        "licenses/qt-libraries/qtshadertools/src/3rdparty/SPIRV-Cross/LICENSE"
+        "licenses/qt-libraries/qtnetworkauth/LICENSES/BSD-3-Clause.txt"
+        "licenses/qt-libraries/qttranslations/LICENSES/GPL-3.0-only.txt"
+        "licenses/qt-libraries/qtwebsockets/LICENSES/LGPL-3.0-only.txt"
+        "licenses/qt-libraries/qtbase/src/3rdparty/pcre2/LICENCE.md"
+        "licenses/qt-libraries/qtbase/src/3rdparty/libjpeg/COPYRIGHT.txt"
+        "licenses/qt-libraries/qttools/src/assistant/qlitehtml/src/3rdparty/GUMBO-AUTHORS.txt"
         "licenses/fdk-aac/NOTICE"
         "licenses/asiosdk/LICENSE.txt"
+        "licenses/asiosdk/common/LICENSE.txt"
+        "licenses/asiosdk/Steinberg ASIO Licensing Agreement.pdf"
         "licenses/harfbuzz/COPYING"
+        "licenses/harfbuzz/src/ms-use/COPYING"
         "licenses/kddockwidgets/LICENSE.txt"
+        "licenses/kddockwidgets/LICENSE.GPL.txt"
+        "licenses/kddockwidgets/LICENSES/GPL-2.0-only.txt"
+        "licenses/kddockwidgets/LICENSES/GPL-3.0-only.txt"
         "licenses/vst3sdk/base/LICENSE.txt"
+        "licenses/vst3sdk/pluginterfaces/LICENSE.txt"
+        "licenses/vst3sdk/public.sdk/LICENSE.txt"
         "licenses/zlib/README"
         "licenses/libsndfile/COPYING"
         "licenses/openssl/LICENSE"
         "licenses/freetype/LICENSE.TXT"
         "licenses/fluidsynth/LICENSE"
         "licenses/lame/COPYING"
+        "licenses/lame/LICENSE"
         "licenses/flac/COPYING.Xiph"
+        "licenses/flac/COPYING.LGPL"
+        "licenses/flac/COPYING.GPL"
+        "licenses/flac/COPYING.FDL"
         "licenses/opus/COPYING"
         "licenses/libopusenc/COPYING"
         "licenses/stb-vorbis/stb_vorbis.c"
@@ -302,19 +332,48 @@ function Assert-InstallLayout {
         "licenses/utf8cpp/LICENSE"
         "licenses/pugixml/pugixml.hpp"
         "licenses/picojson/picojson.h"
+        "licenses/liblouis/COPYING"
         "licenses/liblouis/COPYING.LESSER"
+        "licenses/liblouis/License.md"
         "licenses/intervaltree/LICENSE"
         "licenses/dtl/COPYING"
         "licenses/beatroot/COPYING"
         "licenses/rtf2html/COPYING.LESSER"
         "licenses/fonts/bravura/OFL.txt"
+        "licenses/freefont/COPYING"
+        "licenses/freefont/README"
+        "licenses/freefont/AUTHORS"
+        "licenses/mnxdom/LICENSE"
+        "licenses/libmei/internal/libmei.h"
+        "licenses/libmei/thirdparty/libmei/attclasses.h"
     )
 
-    # Qt attribution metadata is kit-dependent, so the exact paths are not fixed here.
-    $qtAttribution = @($relativePaths | Where-Object { $_ -like "licenses/qt-attribution/*" })
 
+    # Every selected Qt module is copied beneath its own directory, together with
+    # the attribution or canonical metadata files used to assemble its notices.
     $missing = @()
-    if ($qtAttribution.Count -lt 1) { $missing += "licenses/qt-attribution/* (Qt attribution metadata install rule)" }
+    $qtModules = @(
+        'qtbase'
+        'qtdeclarative'
+        'qtsvg'
+        'qttools'
+        'qttranslations'
+        'qt5compat'
+        'qtnetworkauth'
+        'qtshadertools'
+        'qtwebsockets'
+    )
+    foreach ($qtModule in $qtModules) {
+        $modulePrefix = "licenses/qt-libraries/$qtModule/"
+        $moduleMetadata = @($relativePaths | Where-Object {
+            $_ -like "$modulePrefix*qt_attribution.json" -or
+            $_ -like "$modulePrefix*REUSE.toml" -or
+            $_ -like "$modulePrefix*licenseRule.json"
+        })
+        if ($moduleMetadata.Count -lt 1) {
+            $missing += "$modulePrefix (Qt module metadata install rule)"
+        }
+    }
     foreach ($notice in $noticeFiles) {
         if ($relativePaths -notcontains $notice) { $missing += "$notice (license install rule)" }
     }
