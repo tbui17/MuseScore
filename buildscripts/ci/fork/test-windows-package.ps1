@@ -633,10 +633,26 @@ function New-ChildProcessStartInfo {
     }
 }
 
+function Test-ProcessExited {
+    <#
+        Exit state of a process, with no assumption: an unreadable state is reported and treated as
+        not exited, so the caller resolves it instead of believing the process is gone.
+    #>
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Process] $Process)
+
+    try {
+        return $Process.HasExited
+    } catch {
+        Write-Host "   the process exit state could not be read: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Wait-ProcessExit {
     <#
-        Bounded wait for an exit. Returns $true only when the process is known to have exited;
-        a reaped process object is treated as exited rather than as an error.
+        Bounded wait for an exit. $true means the process is known to have exited: the wait reported
+        it, or the wait itself failed and the exit state is still readable and true. Any other
+        outcome is $false, so the caller can fail the run instead of assuming progress.
     #>
     param(
         [Parameter(Mandatory = $true)][System.Diagnostics.Process] $Process,
@@ -646,46 +662,30 @@ function Wait-ProcessExit {
     try {
         return $Process.WaitForExit($TimeoutSeconds * 1000)
     } catch {
-        return $true
+        Write-Host "   waiting for the process to exit failed: $($_.Exception.Message)"
+        return (Test-ProcessExited -Process $Process)
     }
 }
 
 function Stop-ProcessTree {
     <#
-        Terminates a process and its descendants and confirms the exit within a deadline. Returns
-        $true only when the process is known to have exited: the exit status of taskkill/pkill is
-        not treated as proof, and .NET's own tree kill is the fallback. An unconfirmed termination
-        is reported so the caller can fail the run instead of waiting on a live process.
+        Terminates a process and all of its descendants with .NET's own tree kill and confirms the
+        exit within a deadline. No external termination tool is started or waited on, so nothing
+        here can block past that deadline. Returns $true only when the process is known to have
+        exited; an unconfirmed termination is reported by the caller as a failed run.
     #>
     param([Parameter(Mandatory = $true)][System.Diagnostics.Process] $Process)
 
-    if ($Process.HasExited) {
+    if (Test-ProcessExited -Process $Process) {
         return $true
     }
 
-    if ($script:IsWindowsHost) {
-        $terminationOutput = & taskkill.exe /PID $Process.Id /T /F 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "   taskkill exited $LASTEXITCODE for PID $($Process.Id): $terminationOutput"
-        }
-    } else {
-        & pkill -TERM -P $Process.Id 2>&1 | Out-Null
-        & kill -TERM $Process.Id 2>&1 | Out-Null
-        Start-Sleep -Milliseconds 500
-        & pkill -KILL -P $Process.Id 2>&1 | Out-Null
-        & kill -KILL $Process.Id 2>&1 | Out-Null
-    }
-
-    if (Wait-ProcessExit -Process $Process -TimeoutSeconds $script:KillTimeoutSeconds) {
-        return $true
-    }
-
-    Write-Host "   termination was not confirmed within $($script:KillTimeoutSeconds)s; killing the process tree directly"
     try {
         $Process.Kill($true)
     } catch {
-        Write-Host "   direct process tree kill failed: $($_.Exception.Message)"
+        Write-Host "   process tree kill failed: $($_.Exception.Message)"
     }
+
     return (Wait-ProcessExit -Process $Process -TimeoutSeconds $script:KillTimeoutSeconds)
 }
 
