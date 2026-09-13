@@ -470,7 +470,7 @@ if ($headSha.ToLowerInvariant() -ne $sourceSha.ToLowerInvariant()) {
 
 $version = Read-VersionCmake -Path (Join-Path $sourceRoot 'version.cmake')
 $derivedVersion = "$($version['MUSE_APP_VERSION_MAJOR']).$($version['MUSE_APP_VERSION_MINOR']).$($version['MUSE_APP_VERSION_PATCH'])"
-if (-not $applicationVersion.StartsWith($derivedVersion, [StringComparison]::Ordinal)) {
+if ($applicationVersion -ne $derivedVersion -and -not $applicationVersion.StartsWith("$derivedVersion.", [StringComparison]::Ordinal)) {
     Fail "-SourceDirectory version.cmake is $derivedVersion but provenance application_version is $applicationVersion"
 }
 

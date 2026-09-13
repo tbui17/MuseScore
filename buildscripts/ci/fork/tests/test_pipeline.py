@@ -97,6 +97,32 @@ class TrustBoundaryTests(unittest.TestCase):
                 pipeline.release(None)
             api.assert_not_called()
 
+    def test_artifact_build_without_create_release_never_calls_the_release_api(self):
+        environment = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
+                       "CREATE_RELEASE": "false", "WORKFLOW_SHA": "c" * 40}
+        with patch.dict(os.environ, environment), patch.object(pipeline, "api") as api:
+            with self.assertRaisesRegex(ValueError, "manual-only"):
+                pipeline.release(None)
+            api.assert_not_called()
+
+    def test_bad_tag_or_untrusted_ref_is_rejected_before_any_write(self):
+        provenance = self.directory.parent / (self.directory.name + "-provenance.json")
+        provenance.write_text(json.dumps(self.expected))
+        self.addCleanup(provenance.unlink)
+        args = pipeline.argparse.Namespace(artifacts=self.directory, provenance=provenance)
+        cases = [
+            ({"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/ci/fork-windows-releases",
+              "CREATE_RELEASE": "true", "RELEASE_TAG": "fork-2026.09.13.1", "WORKFLOW_SHA": "c" * 40}, "manual-only"),
+            ({"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
+              "CREATE_RELEASE": "true", "RELEASE_TAG": "fork-2026.09.13.0", "WORKFLOW_SHA": "c" * 40}, "positive N"),
+        ]
+        for environment, message in cases:
+            with self.subTest(ref=environment["GITHUB_REF"], tag=environment["RELEASE_TAG"]), \
+                    patch.dict(os.environ, environment), patch.object(pipeline, "api") as api:
+                with self.assertRaisesRegex(ValueError, message):
+                    pipeline.release(args)
+                api.assert_not_called()
+
     def test_conflicting_tag_never_writes(self):
         provenance = self.directory.parent / (self.directory.name + "-provenance.json")
         provenance.write_text(json.dumps(self.expected))
