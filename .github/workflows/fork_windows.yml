@@ -1,0 +1,258 @@
+name: Fork Windows
+run-name: Fork Windows ${{ inputs.source_ref || github.head_ref || github.ref_name }} (${{ github.event_name }}, attempt ${{ github.run_attempt }})
+
+on:
+  pull_request:
+  push:
+    branches: [main, ci/fork-windows-releases]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Repository branch, tag, or commit to build
+        type: string
+        default: main
+      create_release:
+        description: Create a draft prerelease after every required check
+        type: boolean
+        default: false
+      release_tag:
+        description: New fork-YYYY.MM.DD.N tag (required for release)
+        type: string
+        default: ''
+      use_cache:
+        description: Enable compatible caches (refused until the cold hosted build is qualified)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Distinct manual builds stay separate even when they name the same source ref (GitHub keeps
+  # only one pending run per group), a release is serialised on its tag without cancelling an
+  # active one, and superseded pull request runs are cancelled.
+  group: >-
+    ${{ github.workflow }}-${{
+      (github.event_name == 'workflow_dispatch' && inputs.create_release)
+        && format('release-{0}', inputs.release_tag)
+        || (github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id))
+        || (github.event_name == 'pull_request' && format('pr-{0}', github.ref))
+        || format('push-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  preflight:
+    if: github.repository == 'tbui17/MuseScore'
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      framework_sha: ${{ steps.source.outputs.framework_sha }}
+      framework_url: ${{ steps.source.outputs.framework_url }}
+      workflow_sha: ${{ steps.source.outputs.workflow_sha }}
+      requested_source_ref: ${{ steps.source.outputs.requested_source_ref }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: pipeline
+          persist-credentials: false
+      - name: Lint workflow with verified actionlint
+        working-directory: pipeline
+        run: |
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/actionlint.tar.gz" https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz
+          echo "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" .github/workflows/fork_windows.yml .github/workflows/check_submodules.yml .github/workflows/check_unit_tests.yml .github/workflows/check_testflow_gui.yml
+      - name: Validate trusted helper contracts
+        run: python3 -m unittest discover -s pipeline/buildscripts/ci/fork/tests -p 'test_*.py' -v
+      - name: Validate Windows helper suites before an expensive build
+        working-directory: pipeline
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          if (-not (Get-Module -ListAvailable -Name Pester | Where-Object { $_.Version -eq [version]'5.7.1' })) {
+            Install-Module -Name Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          }
+          Import-Module Pester -RequiredVersion 5.7.1
+          $result = Invoke-Pester -Path buildscripts/ci/fork/tests -CI -Output Detailed -PassThru
+          if ($result.FailedCount -gt 0) { throw "$($result.FailedCount) fork helper test(s) failed" }
+      - name: Resolve source once and verify fork submodule
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          CREATE_RELEASE: ${{ inputs.create_release }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          USE_CACHE: ${{ inputs.use_cache }}
+        run: python3 pipeline/buildscripts/ci/fork/pipeline.py preflight --source source --output provenance/provenance.json
+      - name: Exercise dependency failure boundaries
+        working-directory: source/muse
+        run: cmake -P buildscripts/cmake/deps/tests/run-tests.cmake
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: provenance/provenance.json
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    needs: preflight
+    runs-on: windows-2025
+    timeout-minutes: 240
+    outputs:
+      artifact_id: ${{ steps.package.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          path: pipeline
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
+          path: source
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: source-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: provenance
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.10.2
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qt5compat qtnetworkauth qtshadertools qtwebsockets
+          cache: false
+      - name: Full desktop configure, compile and install
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          SOURCE_REF: ${{ needs.preflight.outputs.requested_source_ref }}
+          WORKFLOW_SHA: ${{ needs.preflight.outputs.workflow_sha }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: ./pipeline/buildscripts/ci/fork/windows-build.ps1 -SourceDirectory ./source -OutputDirectory ./build-output -ProvenancePath ./provenance/provenance.json -SourceSha $env:SOURCE_SHA -SourceRef $env:SOURCE_REF -BuildNumber $env:BUILD_NUMBER
+      - name: Validate and archive installed application
+        shell: pwsh
+        run: ./pipeline/buildscripts/ci/fork/package-windows.ps1 -SourceDirectory ./source -InstallDirectory ./build-output/install -OutputDirectory ./package -ProvenancePath ./provenance/provenance.json
+      - name: Upload validated binary package
+        id: package
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-candidate-${{ needs.preflight.outputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            package/*.zip
+            package/build-manifest.json
+            package/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Upload diagnostics, not a release package
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: diagnostic-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build-output/logs
+            source/build.release/CMakeFiles/CMakeConfigureLog.yaml
+            source/build.release/CMakeCache.txt
+            source/build.release/install_manifest.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  units:
+    needs: preflight
+    uses: ./.github/workflows/check_unit_tests.yml
+    with:
+      source_sha: ${{ needs.preflight.outputs.source_sha }}
+      code_coverage: false
+
+  runtime:
+    needs: [preflight, windows]
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          path: pipeline
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
+          path: source
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.windows.outputs.artifact_id }}
+          path: package
+          merge-multiple: true
+      - name: Test extracted package without development Qt
+        shell: pwsh
+        env:
+          MUSE_EXPECTED_WORKFLOW_SHA: ${{ needs.preflight.outputs.workflow_sha }}
+          MUSE_EXPECTED_FRAMEWORK_SHA: ${{ needs.preflight.outputs.framework_sha }}
+        run: ./pipeline/buildscripts/ci/fork/test-windows-package.ps1 -ArtifactDirectory ./package -SourceDirectory ./source -OutputDirectory './runtime results'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          # Diagnostics only: the extraction tree and the isolated profile are not uploaded.
+          name: diagnostic-runtime-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runtime results/logs
+          if-no-files-found: ignore
+          retention-days: 14
+
+  readiness:
+    name: Fork Windows readiness
+    # Same fork guard as preflight: an upstream run must not gain a failing status from a
+    # workflow whose jobs are all skipped there. Inside the fork it still runs on failure.
+    if: github.repository == 'tbui17/MuseScore' && always()
+    needs: [preflight, windows, units, runtime]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every mandatory job to succeed
+        env:
+          PREFLIGHT: ${{ needs.preflight.result }}
+          WINDOWS: ${{ needs.windows.result }}
+          UNITS: ${{ needs.units.result }}
+          RUNTIME: ${{ needs.runtime.result }}
+        run: |
+          test "$PREFLIGHT" = success
+          test "$WINDOWS" = success
+          test "$UNITS" = success
+          test "$RUNTIME" = success
+
+  release:
+    if: github.repository == 'tbui17/MuseScore' && github.event_name == 'workflow_dispatch' && inputs.create_release && github.ref == 'refs/heads/main'
+    needs: [preflight, windows, units, runtime, readiness]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: fork-draft-${{ inputs.release_tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          path: pipeline
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.windows.outputs.artifact_id }}
+          path: package
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: source-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: provenance
+      - name: Verify and create draft from tested bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+          CREATE_RELEASE: ${{ inputs.create_release }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python3 pipeline/buildscripts/ci/fork/pipeline.py release --artifacts package --provenance provenance/provenance.json

@@ -1,0 +1,776 @@
+#!/usr/bin/env pwsh
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Cheap negative/structural tests for the fork Windows packaging helpers:
+#   buildscripts/ci/fork/package-windows.ps1
+#   buildscripts/ci/fork/test-windows-package.ps1
+#
+# These tests use a synthetic install tree and a synthetic git checkout. They
+# intentionally do NOT build or run MuseScore. Cases that must launch the
+# packaged executable use a POSIX stub and are skipped on Windows; the real
+# executable is exercised by the hosted fresh-runner job.
+#
+# Runs anywhere pwsh 7 is available:
+#   pwsh -File buildscripts/ci/fork/tests/Test-PackageHelpers.ps1
+#
+# Exit code 0 = every applicable case passed.
+
+[CmdletBinding()]
+param(
+    [string] $RepositoryRoot = '',
+    [string] $WorkRoot = ''
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$script:IsWindowsHost = ($env:OS -eq 'Windows_NT')
+
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+    $RepositoryRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../../../..')).Path
+}
+if ([string]::IsNullOrWhiteSpace($WorkRoot)) {
+    $WorkRoot = Join-Path ([IO.Path]::GetTempPath()) ("musescore-fork-package-tests-" + [Guid]::NewGuid().ToString('n'))
+}
+
+$PackageHelper = Join-Path $RepositoryRoot 'buildscripts/ci/fork/package-windows.ps1'
+$RuntimeHelper = Join-Path $RepositoryRoot 'buildscripts/ci/fork/test-windows-package.ps1'
+
+$script:Passed = 0
+$script:Failed = 0
+$script:Skipped = 0
+
+function Assert-True {
+    param(
+        [Parameter(Mandatory = $false)] $Condition,
+        [Parameter(Mandatory = $true)][string] $Message
+    )
+    if (-not $Condition) {
+        throw $Message
+    }
+}
+
+function Invoke-Case {
+    param(
+        [Parameter(Mandatory = $true)][string] $Name,
+        [Parameter(Mandatory = $true)][scriptblock] $Body
+    )
+    try {
+        & $Body
+        $script:Passed++
+        Write-Host "PASS $Name"
+    } catch {
+        $script:Failed++
+        Write-Host "FAIL $Name :: $($_.Exception.Message)"
+    }
+}
+
+function Skip-Case {
+    param(
+        [Parameter(Mandatory = $true)][string] $Name,
+        [Parameter(Mandatory = $true)][string] $Reason
+    )
+    $script:Skipped++
+    Write-Host "SKIP $Name :: $Reason"
+}
+
+function Invoke-Helper {
+    param(
+        [Parameter(Mandatory = $true)][string] $Script,
+        [Parameter(Mandatory = $true)][string[]] $Arguments,
+        [Parameter(Mandatory = $false)][hashtable] $Environment = @{}
+    )
+
+    $saved = @{}
+    foreach ($name in $Environment.Keys) {
+        $saved[$name] = [Environment]::GetEnvironmentVariable($name)
+        [Environment]::SetEnvironmentVariable($name, $Environment[$name])
+    }
+    try {
+        $output = & pwsh -NoProfile -NonInteractive -File $Script @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        foreach ($name in $saved.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $saved[$name])
+        }
+    }
+
+    # Collapse the console-wrapped error text so assertions can match phrases
+    # that PowerShell formatting may break across lines.
+    $flattened = (($output | Out-String) -replace '\s+', ' ').Trim()
+    return @{ ExitCode = $exitCode; Output = $flattened }
+}
+
+function New-FakeSource {
+    param([Parameter(Mandatory = $true)][string] $Root)
+
+    New-Item -ItemType Directory -Path $Root -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $Root 'version.cmake'), @'
+set(MUSE_APP_NAME_MACHINE_READABLE "MuseScoreStudio")
+set(MUSE_APP_VERSION_MAJOR "5")
+set(MUSE_APP_VERSION_MINOR "0")
+set(MUSE_APP_VERSION_PATCH "0")
+set(MUSE_APP_UNSTABLE ON)
+'@, [Text.UTF8Encoding]::new($false))
+
+    $scriptsDir = Join-Path $Root 'share/testflowscripts'
+    New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
+    foreach ($name in @('TC11_CommandPaletteDialog.js', 'TC14_CommandPaletteAnnounce.js')) {
+        [IO.File]::WriteAllText((Join-Path $scriptsDir $name), "var testCase = {};`n", [Text.UTF8Encoding]::new($false))
+    }
+
+    $fixtureDir = Join-Path $Root 'vtest/scores'
+    New-Item -ItemType Directory -Path $fixtureDir -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fixtureDir 'layout-5.mscx'), '<museScore/>', [Text.UTF8Encoding]::new($false))
+
+    & git -C $Root init -q
+    & git -C $Root -c user.email=ci@example.invalid -c user.name=ci add -A
+    & git -C $Root -c user.email=ci@example.invalid -c user.name=ci commit -q -m 'fixture'
+    $head = (& git -C $Root rev-parse HEAD).Trim()
+    return $head
+}
+
+function Get-ObjectProperty {
+    param(
+        [Parameter(Mandatory = $false)] $Object,
+        [Parameter(Mandatory = $true)][string] $Name
+    )
+    if ($null -eq $Object) { return $null }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Get-ResourceExpectations {
+    $result = & pwsh -NoProfile -NonInteractive -File $PackageHelper -ExportResourceExpectations
+    Assert-True ($LASTEXITCODE -eq 0) 'ExportResourceExpectations must exit 0'
+    $parsed = ($result | Out-String) | ConvertFrom-Json
+    Assert-True ($null -ne $parsed) 'ExportResourceExpectations must emit JSON'
+    Assert-True (@($parsed).Count -gt 0) 'ExportResourceExpectations must not be empty'
+    return @($parsed)
+}
+
+function New-FakeInstall {
+    param(
+        [Parameter(Mandatory = $true)][string] $Root,
+        [Parameter(Mandatory = $true)][object[]] $Expectations,
+        [Parameter(Mandatory = $true)][string] $ExecutableRelativePath,
+        [Parameter(Mandatory = $false)][string] $ExecutableBody = '#!/bin/sh
+exit 0'
+    )
+
+    New-Item -ItemType Directory -Path $Root -Force | Out-Null
+
+    $exeFull = Join-Path $Root ($ExecutableRelativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
+    New-Item -ItemType Directory -Path (Split-Path -Parent $exeFull) -Force | Out-Null
+    [IO.File]::WriteAllText($exeFull, "$ExecutableBody`n", [Text.UTF8Encoding]::new($false))
+    if (-not $script:IsWindowsHost) {
+        & chmod +x $exeFull
+    }
+
+    foreach ($expectation in $Expectations) {
+        $kind = [string] $expectation.kind
+        switch ($kind) {
+            'file' {
+                $full = Join-Path $Root (([string] $expectation.path) -replace '/', [IO.Path]::DirectorySeparatorChar)
+                New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
+                [IO.File]::WriteAllText($full, 'resource', [Text.UTF8Encoding]::new($false))
+            }
+            'anyfile' {
+                $full = Join-Path $Root (([string] $expectation.paths[0]) -replace '/', [IO.Path]::DirectorySeparatorChar)
+                New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
+                [IO.File]::WriteAllText($full, 'runtime', [Text.UTF8Encoding]::new($false))
+            }
+            'dirhas' {
+                $dir = Join-Path $Root (([string] $expectation.path) -replace '/', [IO.Path]::DirectorySeparatorChar)
+                $sub = Join-Path $dir 'sub'
+                New-Item -ItemType Directory -Path $sub -Force | Out-Null
+                $filter = Get-ObjectProperty -Object $expectation -Name 'filter'
+                if ([string]::IsNullOrWhiteSpace($filter) -or $filter -eq '*') {
+                    $name = 'item.txt'
+                } else {
+                    $name = $filter.Replace('*', 'x')
+                }
+                [IO.File]::WriteAllText((Join-Path $sub $name), 'resource', [Text.UTF8Encoding]::new($false))
+            }
+            default { throw "unknown expectation kind '$kind'" }
+        }
+    }
+}
+
+function New-FakeProvenance {
+    param(
+        [Parameter(Mandatory = $true)][string] $Path,
+        [Parameter(Mandatory = $true)][string] $SourceSha,
+        [Parameter(Mandatory = $false)][string] $WorkflowSha = 'a' * 40,
+        [Parameter(Mandatory = $false)][string] $FrameworkSha = 'b' * 40,
+        [Parameter(Mandatory = $false)][string[]] $DropKeys = @()
+    )
+
+    $provenance = [ordered]@{
+        repository           = 'tbui17/MuseScore'
+        requested_source_ref = 'refs/heads/ci/fork-windows-releases'
+        source_sha           = $SourceSha
+        framework_url        = 'https://github.com/tbui17/muse_framework.git'
+        framework_sha        = $FrameworkSha
+        workflow_sha         = $WorkflowSha
+        run_id               = '1234567890'
+        run_attempt          = '1'
+        application_version  = '5.0.0.12345678'
+        channel              = 'development'
+        build_type           = 'RelWithDebInfo'
+        features             = [ordered]@{ audio_export = $true; braille = $true }
+        toolchain            = [ordered]@{ cmake = '3.30.0'; ninja = '1.12.1'; qt = '6.10.2' }
+        dependency_lock      = "muse_framework@$FrameworkSha"
+    }
+    foreach ($key in $DropKeys) {
+        $provenance.Remove($key) | Out-Null
+    }
+    [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $provenance -Depth 8), [Text.UTF8Encoding]::new($false))
+}
+
+$script:StubTemplate = @'
+#!/bin/sh
+case "$1" in
+  --version)
+    printf 'MuseScoreStudio5Development 5.0.0\n'
+    exit 0
+    ;;
+  -o)
+    case "$2" in
+      *.pdf)
+        PDF_WRITER
+        ;;
+      *.mscz)
+        ZIP_WRITER
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    exit 0
+    ;;
+  --test-case-gui)
+    TESTFLOW_RECORD
+    exit 0
+    ;;
+esac
+exit 1
+'@
+
+function New-StubBody {
+    <#
+        POSIX stub standing in for the packaged application: it answers --version, writes a
+        real PDF and a real one-entry ZIP for -o, and records a testflow report for
+        --test-case-gui, unless a switch asks it to reproduce a specific failure mode.
+    #>
+    param(
+        [switch] $WithoutTestflowRecord,
+        [switch] $InvalidPdf
+    )
+
+    $pdfWriter = if ($InvalidPdf) {
+        'printf ''not a PDF document'' > "$2"'
+    } else {
+        'printf ''%%PDF-1.4
+1 0 obj<</Type/Catalog>>endobj
+trailer<<>>
+%%EOF
+'' > "$2"'
+    }
+    $zipWriter = 'python3 -c ''import sys, zipfile; archive = zipfile.ZipFile(sys.argv[1], "w"); archive.writestr("stub-score.mscx", "<museScore/>"); archive.close()'' "$2"'
+    $testflowRecord = if ($WithoutTestflowRecord) { ':' } else { 'mkdir -p "$MUSE_TESTFLOW_DATA_PATH/reports"' }
+
+    return $script:StubTemplate.Replace('PDF_WRITER', $pdfWriter).Replace('ZIP_WRITER', $zipWriter).Replace('TESTFLOW_RECORD', $testflowRecord)
+}
+
+function Get-PackageFile {
+    param([Parameter(Mandatory = $true)][string] $ArtifactRoot)
+    $zips = @(Get-ChildItem -LiteralPath $ArtifactRoot -File -Filter '*.zip')
+    Assert-True ($zips.Count -eq 1) "expected exactly one zip in $ArtifactRoot, found $($zips.Count)"
+    return $zips[0]
+}
+
+function New-FakePackage {
+    <#
+        Produces a valid package directory (zip + SHA256SUMS.txt + manifest) from a
+        fresh synthetic install tree. Returns a hashtable with the paths.
+    #>
+    param([Parameter(Mandatory = $true)][string] $Root)
+
+    $source = Join-Path $Root 'source'
+    $install = Join-Path $Root 'install'
+    $artifact = Join-Path $Root 'artifact'
+    New-Item -ItemType Directory -Path $artifact -Force | Out-Null
+
+    $head = New-FakeSource -Root $source
+    $expectations = Get-ResourceExpectations
+    New-FakeInstall -Root $install -Expectations $expectations -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
+
+    # Installed testflowscripts must be byte-identical to the reviewed source
+    # scripts at this SHA; the runtime helper verifies exactly that.
+    $sourceScripts = Join-Path $source 'share/testflowscripts'
+    $installedScripts = Join-Path $install 'testflowscripts'
+    foreach ($script in @(Get-ChildItem -LiteralPath $sourceScripts -File)) {
+        Copy-Item -LiteralPath $script.FullName -Destination (Join-Path $installedScripts $script.Name) -Force
+    }
+
+    New-FakeProvenance -Path (Join-Path $Root 'provenance.json') -SourceSha $head
+
+    $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+        '-SourceDirectory', $source,
+        '-InstallDirectory', $install,
+        '-OutputDirectory', $artifact,
+        '-ProvenancePath', (Join-Path $Root 'provenance.json')
+    )
+    Assert-True ($result.ExitCode -eq 0) "package helper failed ($($result.ExitCode)): $($result.Output)"
+
+    return @{
+        Source      = $source
+        Install     = $install
+        Artifact    = $artifact
+        Head        = $head
+        Package     = (Get-PackageFile -ArtifactRoot $artifact)
+        Provenance  = (Join-Path $Root 'provenance.json')
+    }
+}
+
+if (-not (Test-Path -LiteralPath $PackageHelper -PathType Leaf)) { throw "missing $PackageHelper" }
+if (-not (Test-Path -LiteralPath $RuntimeHelper -PathType Leaf)) { throw "missing $RuntimeHelper" }
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'git is required for these tests' }
+if (-not (Get-Command python3 -ErrorAction SilentlyContinue)) { throw 'python3 is required to build the score-container stub export' }
+if (-not (Get-Command pwsh -ErrorAction SilentlyContinue)) { throw 'pwsh is required for these tests' }
+
+New-Item -ItemType Directory -Path $WorkRoot -Force | Out-Null
+Write-Host "work root: $WorkRoot"
+
+try {
+    # ------------------------------------------------------------------
+    # package-windows.ps1: structural failure cases
+    # ------------------------------------------------------------------
+    Invoke-Case 'package: metadata-only install tree is rejected' {
+        $root = Join-Path $WorkRoot 'pkg-metadata-only'
+        $source = Join-Path $root 'source'
+        $install = Join-Path $root 'install'
+        $artifact = Join-Path $root 'artifact'
+        New-Item -ItemType Directory -Path $install, $artifact -Force | Out-Null
+        $head = New-FakeSource -Root $source
+        New-FakeProvenance -Path (Join-Path $root 'provenance.json') -SourceSha $head
+
+        $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+            '-SourceDirectory', $source, '-InstallDirectory', $install,
+            '-OutputDirectory', $artifact, '-ProvenancePath', (Join-Path $root 'provenance.json'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a metadata-only install tree'
+        Assert-True ($result.Output -match 'missing the application executable') "unexpected error text: $($result.Output)"
+    }
+
+    Invoke-Case 'package: missing Qt QML/resource directory is rejected' {
+        $root = Join-Path $WorkRoot 'pkg-missing-resource'
+        $source = Join-Path $root 'source'
+        $install = Join-Path $root 'install'
+        $artifact = Join-Path $root 'artifact'
+        New-Item -ItemType Directory -Path $artifact -Force | Out-Null
+        $head = New-FakeSource -Root $source
+        $expectations = Get-ResourceExpectations
+        New-FakeInstall -Root $install -Expectations $expectations -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
+        Remove-Item -LiteralPath (Join-Path $install 'qml') -Recurse -Force
+        New-FakeProvenance -Path (Join-Path $root 'provenance.json') -SourceSha $head
+
+        $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+            '-SourceDirectory', $source, '-InstallDirectory', $install,
+            '-OutputDirectory', $artifact, '-ProvenancePath', (Join-Path $root 'provenance.json'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when a Qt QML tree is missing'
+        Assert-True ($result.Output -match "'qml'") "unexpected error text: $($result.Output)"
+    }
+
+    Invoke-Case 'package: provenance missing an identity key is rejected' {
+        $root = Join-Path $WorkRoot 'pkg-missing-provenance-key'
+        $source = Join-Path $root 'source'
+        $install = Join-Path $root 'install'
+        $artifact = Join-Path $root 'artifact'
+        New-Item -ItemType Directory -Path $artifact -Force | Out-Null
+        $head = New-FakeSource -Root $source
+        New-FakeInstall -Root $install -Expectations (Get-ResourceExpectations) -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
+        New-FakeProvenance -Path (Join-Path $root 'provenance.json') -SourceSha $head -DropKeys @('workflow_sha', 'toolchain')
+
+        $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+            '-SourceDirectory', $source, '-InstallDirectory', $install,
+            '-OutputDirectory', $artifact, '-ProvenancePath', (Join-Path $root 'provenance.json'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for missing provenance keys'
+        Assert-True ($result.Output -match 'workflow_sha') "unexpected error text: $($result.Output)"
+    }
+
+    Invoke-Case 'package: source_sha that does not match the checkout is rejected' {
+        $root = Join-Path $WorkRoot 'pkg-source-mismatch'
+        $source = Join-Path $root 'source'
+        $install = Join-Path $root 'install'
+        $artifact = Join-Path $root 'artifact'
+        New-Item -ItemType Directory -Path $artifact -Force | Out-Null
+        $null = New-FakeSource -Root $source
+        New-FakeInstall -Root $install -Expectations (Get-ResourceExpectations) -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
+        New-FakeProvenance -Path (Join-Path $root 'provenance.json') -SourceSha ('c' * 40)
+
+        $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+            '-SourceDirectory', $source, '-InstallDirectory', $install,
+            '-OutputDirectory', $artifact, '-ProvenancePath', (Join-Path $root 'provenance.json'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a source_sha mismatch'
+        # Observable outcome only: the wrapped console text breaks the message across lines, so
+        # assert that nothing was packaged rather than pinning the exact phrasing.
+        Assert-True (@(Get-ChildItem -LiteralPath $artifact -File -ErrorAction SilentlyContinue).Count -eq 0) `
+            'a rejected package must not leave a package file behind'
+    }
+
+    Invoke-Case 'package: output directory inside the install tree is rejected' {
+        $root = Join-Path $WorkRoot 'pkg-output-inside-install'
+        $source = Join-Path $root 'source'
+        $install = Join-Path $root 'install'
+        $head = New-FakeSource -Root $source
+        New-FakeInstall -Root $install -Expectations (Get-ResourceExpectations) -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
+        New-FakeProvenance -Path (Join-Path $root 'provenance.json') -SourceSha $head
+
+        $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+            '-SourceDirectory', $source, '-InstallDirectory', $install,
+            '-OutputDirectory', (Join-Path $install 'out'), '-ProvenancePath', (Join-Path $root 'provenance.json'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the output dir is inside the install tree'
+        Assert-True ($result.Output -match 'must not be inside -InstallDirectory') "unexpected error text: $($result.Output)"
+    }
+
+    # ------------------------------------------------------------------
+    # package-windows.ps1: success path and artifact contract
+    # ------------------------------------------------------------------
+    Invoke-Case 'package: valid tree produces exactly the zip/SHA256SUMS/manifest trio' {
+        $package = New-FakePackage -Root (Join-Path $WorkRoot 'pkg-ok')
+        $artifact = $package.Artifact
+
+        $files = @(Get-ChildItem -LiteralPath $artifact -File | Sort-Object Name)
+        Assert-True ($files.Count -eq 3) "expected exactly 3 artifact files, found $($files.Count): $($files.Name -join ', ')"
+        $expectedNames = @('SHA256SUMS.txt', 'build-manifest.json', $package.Package.Name) | Sort-Object
+        Assert-True (($files.Name -join ',') -eq ($expectedNames -join ',')) `
+            "unexpected artifact set: $($files.Name -join ', ')"
+        Assert-True ($package.Package.Name -match '^tbui17-MuseScore-5\.0\.0\.12345678-x64-[0-9a-f]{12}-unsigned\.zip$') `
+            "unexpected package name: $($package.Package.Name)"
+
+        $sha = (Get-FileHash -LiteralPath $package.Package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $sums = @(Get-Content -LiteralPath (Join-Path $artifact 'SHA256SUMS.txt') | Where-Object { $_.Trim().Length -gt 0 })
+        Assert-True ($sums.Count -eq 1) 'SHA256SUMS.txt must have exactly one line'
+        Assert-True ($sums[0] -eq "$sha  $($package.Package.Name)") "unexpected SHA256SUMS.txt content: $($sums[0])"
+
+        $manifest = Get-Content -LiteralPath (Join-Path $artifact 'build-manifest.json') -Raw | ConvertFrom-Json
+        Assert-True ($manifest.source_sha -eq $package.Head) 'manifest source_sha must equal the checkout HEAD'
+        Assert-True ($manifest.repository -eq 'tbui17/MuseScore') 'manifest repository mismatch'
+        Assert-True ($manifest.executable -eq 'bin/MuseScoreStudio5.exe') "unexpected executable: $($manifest.executable)"
+        Assert-True ($manifest.package.filename -eq $package.Package.Name) 'manifest package filename mismatch'
+        Assert-True ([int64]$manifest.package.size -eq [int64]$package.Package.Length) 'manifest package size mismatch'
+        Assert-True ($manifest.package.sha256 -eq $sha) 'manifest package sha256 mismatch'
+        Assert-True ([int] $manifest.package.size -gt 0) 'manifest package size must be positive'
+        Assert-True (@($manifest.resource_expectations).Count -ge 20) 'manifest resource expectations look too small'
+        Assert-True (@($manifest.resource_expectations) -contains 'bin/platforms/qwindows.dll') 'manifest must record the Qt platform plugin'
+        Assert-True (@($manifest.resource_expectations) -contains 'testflowscripts/TC11_CommandPaletteDialog.js') 'manifest must record installed test scripts'
+        Assert-True ($manifest.dependency_lock -like '*muse_framework@*') 'manifest must carry the dependency lock identity'
+    }
+
+    Invoke-Case 'package: export of resource expectations is valid JSON' {
+        $expectations = Get-ResourceExpectations
+        Assert-True (@($expectations).Count -ge 20) 'expected at least 20 default expectations'
+        $kinds = @($expectations | ForEach-Object { $_.kind } | Sort-Object -Unique)
+        foreach ($kind in $kinds) {
+            Assert-True (@('file', 'anyfile', 'dirhas') -contains $kind) "unexpected expectation kind '$kind'"
+        }
+    }
+
+    # ------------------------------------------------------------------
+    # test-windows-package.ps1: preflight failure cases (no execution needed)
+    # ------------------------------------------------------------------
+    Invoke-Case 'runtime: package checksum mismatch is rejected before extraction' {
+        $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-checksum')
+        $bytes = [IO.File]::ReadAllBytes($package.Package.FullName)
+        $bytes[$bytes.Length - 1] = $bytes[$bytes.Length - 1] -bxor 0xFF
+        [IO.File]::WriteAllBytes($package.Package.FullName, $bytes)
+
+        $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+            '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+            '-OutputDirectory', (Join-Path $WorkRoot 'rt-checksum-out'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a checksum mismatch'
+        Assert-True ($result.Output -match 'sha256 mismatch') "unexpected error text: $($result.Output)"
+    }
+
+    Invoke-Case 'runtime: workflow_sha is compared against MUSE_EXPECTED_WORKFLOW_SHA' {
+        $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-workflow-sha')
+        $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+            '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+            '-OutputDirectory', (Join-Path $WorkRoot 'rt-workflow-sha-out')) `
+            -Environment @{ MUSE_EXPECTED_WORKFLOW_SHA = ('e' * 40) }
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a workflow_sha mismatch'
+        Assert-True ($result.Output -match 'workflow_sha') "unexpected error text: $($result.Output)"
+    }
+
+    Invoke-Case 'runtime: framework_sha is compared against MUSE_EXPECTED_FRAMEWORK_SHA' {
+        $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-framework-sha')
+        $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+            '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+            '-OutputDirectory', (Join-Path $WorkRoot 'rt-framework-sha-out')) `
+            -Environment @{ MUSE_EXPECTED_FRAMEWORK_SHA = ('f' * 40) }
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a framework_sha mismatch'
+        Assert-True ($result.Output -match 'framework_sha') "unexpected error text: $($result.Output)"
+    }
+
+    Invoke-Case 'runtime: manifest resource expectation missing from the archive is reported' {
+        $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-missing-resource')
+        $manifestPath = Join-Path $package.Artifact 'build-manifest.json'
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $expectations = @($manifest.resource_expectations) + 'qml/does-not-exist/qmldir'
+        $manifest.resource_expectations = $expectations
+        [IO.File]::WriteAllText($manifestPath, (ConvertTo-Json -InputObject $manifest -Depth 10), [Text.UTF8Encoding]::new($false))
+
+        $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+            '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+            '-OutputDirectory', (Join-Path $WorkRoot 'rt-missing-resource-out'),
+            '-VersionTimeoutSeconds', '10', '-ExportTimeoutSeconds', '10', '-GuiTimeoutSeconds', '10')
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when a resource is missing from the package'
+        Assert-True ($result.Output -match 'missing manifest resource') "unexpected error text: $($result.Output)"
+    }
+
+    Invoke-Case 'runtime: archive entry escaping the extraction root is rejected' {
+        $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-zipslip')
+        $packagePath = $package.Package.FullName
+        $archive = [System.IO.Compression.ZipFile]::Open($packagePath, [System.IO.Compression.ZipArchiveMode]::Update)
+        try {
+            $entry = $archive.CreateEntry('../escaped.txt')
+            $writer = [IO.StreamWriter]::new($entry.Open())
+            $writer.Write('escape')
+            $writer.Dispose()
+        } finally {
+            $archive.Dispose()
+        }
+
+        $newSize = (Get-Item -LiteralPath $packagePath).Length
+        $newSha = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $manifestPath = Join-Path $package.Artifact 'build-manifest.json'
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $manifest.package.size = $newSize
+        $manifest.package.sha256 = $newSha
+        [IO.File]::WriteAllText($manifestPath, (ConvertTo-Json -InputObject $manifest -Depth 10), [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $package.Artifact 'SHA256SUMS.txt'), "$newSha  $($package.Package.Name)`n", [Text.UTF8Encoding]::new($false))
+
+        $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+            '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+            '-OutputDirectory', (Join-Path $WorkRoot 'rt-zipslip-out'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for an escaping archive entry'
+        Assert-True ($result.Output -match 'escapes the extraction root') "unexpected error text: $($result.Output)"
+    }
+
+    # ------------------------------------------------------------------
+    # test-windows-package.ps1: execution cases (POSIX stub executable)
+    # ------------------------------------------------------------------
+    $executionSkipReason = 'the packaged executable stub requires a POSIX host; the real exe is exercised on the hosted Windows runner'
+
+    if ($script:IsWindowsHost) {
+        Skip-Case 'runtime: missing installed test script fails the run' $executionSkipReason
+        Skip-Case 'runtime: --version with no output is not a pass' $executionSkipReason
+        Skip-Case 'runtime: nonzero exit fails the run' $executionSkipReason
+        Skip-Case 'runtime: hang is killed and reported as a timeout' $executionSkipReason
+        Skip-Case 'runtime: stub application passes version/export/GUI checks' $executionSkipReason
+    } else {
+        Invoke-Case 'runtime: missing installed test script fails the run' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-missing-test')
+            $packagePath = $package.Package.FullName
+            $archive = [System.IO.Compression.ZipFile]::Open($packagePath, [System.IO.Compression.ZipArchiveMode]::Update)
+            try {
+                foreach ($entry in @($archive.Entries | Where-Object { $_.FullName -like 'testflowscripts/*' })) {
+                    $entry.Delete()
+                }
+            } finally {
+                $archive.Dispose()
+            }
+            $newSize = (Get-Item -LiteralPath $packagePath).Length
+            $newSha = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $manifestPath = Join-Path $package.Artifact 'build-manifest.json'
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $manifest.package.size = $newSize
+            $manifest.package.sha256 = $newSha
+            $manifest.resource_expectations = @($manifest.resource_expectations | Where-Object { $_ -notlike 'testflowscripts/*' })
+            [IO.File]::WriteAllText($manifestPath, (ConvertTo-Json -InputObject $manifest -Depth 10), [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText((Join-Path $package.Artifact 'SHA256SUMS.txt'), "$newSha  $($package.Package.Name)`n", [Text.UTF8Encoding]::new($false))
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-missing-test-out'),
+                '-VersionTimeoutSeconds', '10', '-ExportTimeoutSeconds', '10', '-GuiTimeoutSeconds', '10')
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a missing installed test script'
+            Assert-True ($result.Output -match 'does not contain the installed test script') "unexpected error text: $($result.Output)"
+        }
+
+        Invoke-Case 'runtime: --version with no output is not a pass' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-version-silent')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, "#!/bin/sh`nexit 0`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            # Re-package so the artifact carries the silent stub.
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the silent stub failed'
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-version-silent-out'),
+                '-VersionTimeoutSeconds', '10', '-ExportTimeoutSeconds', '10', '-GuiTimeoutSeconds', '10')
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when --version prints nothing'
+            Assert-True ($result.Output -match 'no recognisable version banner') "unexpected error text: $($result.Output)"
+        }
+
+        Invoke-Case 'runtime: nonzero exit fails the run' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-exit-one')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, "#!/bin/sh`nexit 3`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the failing stub failed'
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-exit-one-out'),
+                '-VersionTimeoutSeconds', '10', '-ExportTimeoutSeconds', '10', '-GuiTimeoutSeconds', '10')
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the application exits nonzero'
+            Assert-True ($result.Output -match 'exited with 3') "unexpected error text: $($result.Output)"
+        }
+
+        Invoke-Case 'runtime: hang is killed and reported as a timeout' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-hang')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, "#!/bin/sh`nsleep 600`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the hanging stub failed'
+
+            $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-hang-out'),
+                '-VersionTimeoutSeconds', '3', '-ExportTimeoutSeconds', '3', '-GuiTimeoutSeconds', '3')
+            $stopwatch.Stop()
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a hanging application'
+            Assert-True ($result.Output -match 'timed out') "unexpected error text: $($result.Output)"
+            Assert-True ($stopwatch.Elapsed.TotalSeconds -lt 60) "timeout handling took too long: $($stopwatch.Elapsed.TotalSeconds)s"
+        }
+
+        Invoke-Case 'runtime: stub application passes version/export/GUI checks' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-ok')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, (New-StubBody) + "`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the passing stub failed'
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-ok-out'),
+                '-VersionTimeoutSeconds', '15', '-ExportTimeoutSeconds', '15', '-GuiTimeoutSeconds', '30')
+            Assert-True ($result.ExitCode -eq 0) "expected the stub package to pass, got $($result.ExitCode): $($result.Output)"
+            $reportPath = Join-Path $WorkRoot 'rt-ok-out/logs/runtime-tests.json'
+            Assert-True (Test-Path -LiteralPath $reportPath) 'runtime helper must write logs/runtime-tests.json'
+            $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+            $names = @($report | ForEach-Object { $_.name })
+            Assert-True ($names -contains 'version') 'report must include the version check'
+            Assert-True ($names -contains 'export-pdf') 'report must include the rendered PDF export'
+            Assert-True ($names -contains 'export-mscz') 'report must include the score container export'
+            Assert-True ($names -contains 'TC11_CommandPaletteDialog.js') 'report must include TC11'
+            Assert-True ($names -contains 'TC14_CommandPaletteAnnounce.js') 'report must include TC14'
+            Assert-True (Test-Path -LiteralPath (Join-Path $WorkRoot 'rt-ok-out/logs/export-pdf.stdout.log')) 'PDF export output must be retained for diagnosis'
+        }
+
+        Invoke-Case 'runtime: export that is not a PDF document fails the run' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-invalid-pdf')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, (New-StubBody -InvalidPdf) + "`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the invalid-PDF stub failed'
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-invalid-pdf-out'),
+                '-VersionTimeoutSeconds', '15', '-ExportTimeoutSeconds', '15', '-GuiTimeoutSeconds', '30')
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the export is not a PDF document'
+            Assert-True ($result.Output -match 'is not a PDF document') "unexpected error text: $($result.Output)"
+        }
+
+        Invoke-Case 'runtime: GUI run without a recorded testflow test case fails' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-no-record')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, (New-StubBody -WithoutTestflowRecord) + "`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the record-less stub failed'
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-no-record-out'),
+                '-VersionTimeoutSeconds', '15', '-ExportTimeoutSeconds', '15', '-GuiTimeoutSeconds', '30')
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the runner records no test case'
+            Assert-True ($result.Output -match 'without the testflow runner recording a test case') "unexpected error text: $($result.Output)"
+        }
+
+        Invoke-Case 'runtime: missing reviewed source script fails instead of falling back' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-no-reviewed-script')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, (New-StubBody) + "`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+
+            # Drop the reviewed script from the source checkout, then re-commit and re-package so
+            # the source SHA, the install tree and the manifest stay consistent and only the
+            # reviewed script is missing.
+            Remove-Item -LiteralPath (Join-Path $package.Source 'share/testflowscripts/TC14_CommandPaletteAnnounce.js') -Force
+            & git -C $package.Source -c user.email=ci@example.invalid -c user.name=ci add -A
+            & git -C $package.Source -c user.email=ci@example.invalid -c user.name=ci commit -q -m 'drop reviewed script'
+            $newHead = (& git -C $package.Source rev-parse HEAD).Trim()
+            New-FakeProvenance -Path $package.Provenance -SourceSha $newHead
+            # The new source SHA changes the package file name, so the repackaged artifact goes
+            # to its own directory rather than beside the previous package.
+            $rebuiltArtifact = Join-Path $WorkRoot 'rt-no-reviewed-script-artifact'
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $rebuiltArtifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging after dropping the reviewed script failed'
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $rebuiltArtifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-no-reviewed-script-out'),
+                '-VersionTimeoutSeconds', '15', '-ExportTimeoutSeconds', '15', '-GuiTimeoutSeconds', '30')
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the reviewed script is absent'
+            Assert-True ($result.Output -match 'refusing to run the packaged copy') "unexpected error text: $($result.Output)"
+        }
+
+        Invoke-Case 'runtime: manifest executable that escapes the root or contradicts source metadata fails' {
+            foreach ($candidate in @('bin/../../evil.exe', 'bin/OtherStudio5.exe')) {
+                $root = Join-Path $WorkRoot ("rt-executable-" + ($candidate -replace '[^A-Za-z0-9]', '-'))
+                $package = New-FakePackage -Root $root
+                $manifestPath = Join-Path $package.Artifact 'build-manifest.json'
+                $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+                $manifest.executable = $candidate
+                [IO.File]::WriteAllText($manifestPath, (ConvertTo-Json -InputObject $manifest -Depth 10), [Text.UTF8Encoding]::new($false))
+
+                $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                    '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                    '-OutputDirectory', (Join-Path $root 'out'))
+                Assert-True ($result.ExitCode -ne 0) "expected a nonzero exit for manifest executable '$candidate'"
+                if ($candidate -like '*..*') {
+                    Assert-True ($result.Output -match 'escapes the extraction root') "unexpected error text: $($result.Output)"
+                } else {
+                    Assert-True ($result.Output -match 'derived from the source checkout') "unexpected error text: $($result.Output)"
+                }
+            }
+        }
+    }
+} finally {
+    Write-Host ''
+    Write-Host "cases: $($script:Passed) passed, $($script:Failed) failed, $($script:Skipped) skipped"
+}
+
+if ($script:Failed -gt 0) {
+    exit 1
+}
+exit 0
