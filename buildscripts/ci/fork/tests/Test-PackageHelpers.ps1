@@ -95,9 +95,10 @@ function Invoke-Helper {
         }
     }
 
-    # Collapse the console-wrapped error text so assertions can match phrases
-    # that PowerShell formatting may break across lines.
-    $flattened = (($output | Out-String) -replace '\s+', ' ').Trim()
+    # Collapse the console-wrapped error text so assertions can match phrases that PowerShell
+    # formatting may break across lines: it renders a thrown message wrapped and prefixed with '|',
+    # so those continuation lines are joined before whitespace is collapsed.
+    $flattened = ((($output | Out-String) -replace '(?m)\r?\n\s*\|\s*', ' ') -replace '\s+', ' ').Trim()
     return @{ ExitCode = $exitCode; Output = $flattened }
 }
 
@@ -302,6 +303,7 @@ case "$1" in
   --version)
     printf 'MuseScoreStudio5Development 5.0.0\n'
     ENV_PROBE
+    STRAY_OUTPUT
     exit 0
     ;;
   -o)
@@ -483,7 +485,8 @@ function New-StubBody {
         [string] $ReportMode = 'Valid',
         [switch] $InvalidPdf,
         [switch] $BrokenProbes,
-        [switch] $UnexpectedProbeExit
+        [switch] $UnexpectedProbeExit,
+        [switch] $StrandedOutput
     )
 
     $pdfWriter = if ($InvalidPdf) {
@@ -501,6 +504,10 @@ trailer<<>>
     $envProbe = 'printf ''%s\n'' "$APPDATA" "$LOCALAPPDATA" > "$MUSE_TESTFLOW_DATA_PATH/child-profile-env.txt"'
     $stub = $script:StubTemplate.Replace('PDF_WRITER', $pdfWriter).Replace('ZIP_WRITER', $zipWriter)
     $stub = $stub.Replace('ENV_PROBE', $envProbe)
+    # A descendant that inherits the redirected pipes keeps them open after the stub exits, which is
+    # how a read to end of stream can wait indefinitely.
+    $strayOutput = if ($StrandedOutput) { '    sleep 45 &' } else { '' }
+    $stub = $stub.Replace('STRAY_OUTPUT', $strayOutput)
     $stub = $stub.Replace('PROBE_BRANCHES', (New-TestflowProbeStubBranches -Broken:$BrokenProbes -UnexpectedExit:$UnexpectedProbeExit))
     foreach ($scriptFileName in $script:FixtureTestCases.Keys) {
         $placeholder = ($scriptFileName -replace '_CommandPalette.*', '') + '_REPORT'
@@ -796,31 +803,28 @@ try {
     # evidence.
     $hostedRunnerEnvironment = @{ GITHUB_ACTIONS = 'true'; RUNNER_ENVIRONMENT = 'github-hosted' }
 
-    Invoke-Case 'profile: plan resolves the development profile under the given known folders' {
+    Invoke-Case 'profile: plan resolves the development profile in the profile sandbox' {
         $root = Join-Path $WorkRoot 'profile-plan'
-        $roaming = Join-Path $root 'Roaming'
-        $local = Join-Path $root 'Local'
+        $roaming = Join-Path $root 'profile/AppData/Roaming'
+        $local = Join-Path $root 'profile/AppData/Local'
         New-Item -ItemType Directory -Path $roaming, $local -Force | Out-Null
         $source = Join-Path $root 'source'
         $null = New-FakeSource -Root $source
 
         $result = Invoke-ProfilePlan -Environment $hostedRunnerEnvironment -Arguments @(
-            '-ExportProfilePlan', '-SourceDirectory', $source,
-            '-ProfileRoamingRoot', $roaming, '-ProfileLocalRoot', $local)
+            '-ExportProfilePlan', '-SourceDirectory', $source, '-OutputDirectory', $root)
         Assert-True ($result.ExitCode -eq 0) "profile plan must resolve, got exit $($result.ExitCode): $($result.Text)"
         Assert-True ($null -ne $result.Plan) "profile plan must be JSON: $($result.Text)"
         Assert-True ($result.Plan.profile_name -eq 'MuseScoreStudio5Development') "unexpected profile name: $($result.Plan.profile_name)"
         Assert-True ($result.Plan.settings_file -eq (Join-Path $roaming 'MuseScore/MuseScoreStudio5Development.ini')) "unexpected settings file: $($result.Plan.settings_file)"
         Assert-True ($result.Plan.profile_directory -eq (Join-Path $local 'MuseScore/MuseScoreStudio5Development')) "unexpected profile directory: $($result.Plan.profile_directory)"
         Assert-True ($result.Plan.log_directory -eq (Join-Path $local 'MuseScore/MuseScoreStudio5Development/logs')) "unexpected log directory: $($result.Plan.log_directory)"
-        # A real Windows run never redirects APPDATA/LOCALAPPDATA; only the POSIX sandbox does.
-        Assert-True ($result.Plan.redirect_environment -eq $false) 'a real profile plan must not rely on environment redirection'
     }
 
     Invoke-Case 'profile: an existing development profile is refused, never overwritten' {
         $root = Join-Path $WorkRoot 'profile-existing'
-        $roaming = Join-Path $root 'Roaming'
-        $local = Join-Path $root 'Local'
+        $roaming = Join-Path $root 'profile/AppData/Roaming'
+        $local = Join-Path $root 'profile/AppData/Local'
         New-Item -ItemType Directory -Path (Join-Path $roaming 'MuseScore'), $local -Force | Out-Null
         $source = Join-Path $root 'source'
         $null = New-FakeSource -Root $source
@@ -829,8 +833,7 @@ try {
         $existingContent = "[application]`r`nhasCompletedFirstLaunchSetup=false`r`n"
         [IO.File]::WriteAllText($existingIni, $existingContent, [Text.UTF8Encoding]::new($false))
         $result = Invoke-ProfilePlan -Environment $hostedRunnerEnvironment -Arguments @(
-            '-ExportProfilePlan', '-SourceDirectory', $source,
-            '-ProfileRoamingRoot', $roaming, '-ProfileLocalRoot', $local)
+            '-ExportProfilePlan', '-SourceDirectory', $source, '-OutputDirectory', $root)
         Assert-True ($result.ExitCode -ne 0) 'a profile that already exists must fail the run'
         Assert-True ($result.Flattened -match 'refusing to overwrite an existing development profile') "unexpected error text: $($result.Flattened)"
         Assert-True ([IO.File]::ReadAllText($existingIni) -eq $existingContent) 'the existing settings file must not be modified'
@@ -839,17 +842,14 @@ try {
         Remove-Item -LiteralPath $existingIni -Force
         New-Item -ItemType Directory -Path (Join-Path $local 'MuseScore/MuseScoreStudio5Development') -Force | Out-Null
         $result = Invoke-ProfilePlan -Environment $hostedRunnerEnvironment -Arguments @(
-            '-ExportProfilePlan', '-SourceDirectory', $source,
-            '-ProfileRoamingRoot', $roaming, '-ProfileLocalRoot', $local)
+            '-ExportProfilePlan', '-SourceDirectory', $source, '-OutputDirectory', $root)
         Assert-True ($result.ExitCode -ne 0) 'an existing application-local profile directory must fail the run'
         Assert-True ($result.Flattened -match 'refusing to overwrite an existing development profile') "unexpected error text: $($result.Flattened)"
     }
 
     Invoke-Case 'profile: preparing a real profile requires a GitHub-hosted runner' {
         $root = Join-Path $WorkRoot 'profile-guard'
-        $roaming = Join-Path $root 'Roaming'
-        $local = Join-Path $root 'Local'
-        New-Item -ItemType Directory -Path $roaming, $local -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $root 'profile/AppData/Roaming'), (Join-Path $root 'profile/AppData/Local') -Force | Out-Null
         $source = Join-Path $root 'source'
         $null = New-FakeSource -Root $source
 
@@ -857,8 +857,7 @@ try {
                 @{ GITHUB_ACTIONS = $null; RUNNER_ENVIRONMENT = 'github-hosted'; Expect = 'outside GitHub Actions' }
                 @{ GITHUB_ACTIONS = 'true'; RUNNER_ENVIRONMENT = 'self-hosted'; Expect = 'outside a GitHub-hosted runner' })) {
             $result = Invoke-ProfilePlan -Environment $environment -Arguments @(
-                '-ExportProfilePlan', '-SourceDirectory', $source,
-                '-ProfileRoamingRoot', $roaming, '-ProfileLocalRoot', $local)
+                '-ExportProfilePlan', '-SourceDirectory', $source, '-OutputDirectory', $root)
             Assert-True ($result.ExitCode -ne 0) "expected a refusal for $($environment.Expect): $($result.Flattened)"
             Assert-True ($result.Flattened -match $environment.Expect) "unexpected error text: $($result.Flattened)"
         }
@@ -866,17 +865,14 @@ try {
 
     Invoke-Case 'profile: a checkout without the development channel is refused' {
         $root = Join-Path $WorkRoot 'profile-channel'
-        $roaming = Join-Path $root 'Roaming'
-        $local = Join-Path $root 'Local'
-        New-Item -ItemType Directory -Path $roaming, $local -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $root 'profile/AppData/Roaming'), (Join-Path $root 'profile/AppData/Local') -Force | Out-Null
         $source = Join-Path $root 'source'
         $null = New-FakeSource -Root $source
         $versionPath = Join-Path $source 'version.cmake'
         [IO.File]::WriteAllText($versionPath, ([IO.File]::ReadAllText($versionPath) -replace 'MUSE_APP_UNSTABLE ON', 'MUSE_APP_UNSTABLE OFF'), [Text.UTF8Encoding]::new($false))
 
         $result = Invoke-ProfilePlan -Environment $hostedRunnerEnvironment -Arguments @(
-            '-ExportProfilePlan', '-SourceDirectory', $source,
-            '-ProfileRoamingRoot', $roaming, '-ProfileLocalRoot', $local)
+            '-ExportProfilePlan', '-SourceDirectory', $source, '-OutputDirectory', $root)
         Assert-True ($result.ExitCode -ne 0) 'a non-development checkout must not seed a profile'
         Assert-True ($result.Flattened -match 'MUSE_APP_UNSTABLE') "unexpected error text: $($result.Flattened)"
     }
@@ -893,6 +889,7 @@ try {
         Skip-Case 'runtime: hang is killed and reported as a timeout' $executionSkipReason
         Skip-Case 'runtime: stub application passes version/export/GUI checks' $executionSkipReason
         Skip-Case 'runtime: first-run profile is seeded in the sandbox and handed to the child' $executionSkipReason
+        Skip-Case 'runtime: output that never reaches end of stream fails instead of hanging' $executionSkipReason
         Skip-Case "runtime: GUI run with a 'Missing' testflow report fails" $executionSkipReason
         Skip-Case "runtime: GUI run with a 'DirectoryOnly' testflow report fails" $executionSkipReason
         Skip-Case "runtime: GUI run with a 'Empty' testflow report fails" $executionSkipReason
@@ -1009,6 +1006,29 @@ try {
             Assert-True ($names -contains 'TC11_CommandPaletteDialog.js') 'report must include TC11'
             Assert-True ($names -contains 'TC14_CommandPaletteAnnounce.js') 'report must include TC14'
             Assert-True (Test-Path -LiteralPath (Join-Path $WorkRoot 'rt-ok-out/logs/export-pdf.stdout.log')) 'PDF export output must be retained for diagnosis'
+        }
+
+        Invoke-Case 'runtime: output that never reaches end of stream fails instead of hanging' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-stranded-output')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, (New-StubBody -StrandedOutput) + "`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the stranded-output stub failed'
+
+            # The version child exits 0 but leaves a descendant holding the inherited pipes open, so
+            # the redirected streams never reach end of stream. The helper must stop reading at its
+            # drain deadline and fail the run instead of waiting for that descendant to exit.
+            $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-stranded-output-out'),
+                '-VersionTimeoutSeconds', '15', '-ExportTimeoutSeconds', '15', '-GuiTimeoutSeconds', '30')
+            $stopwatch.Stop()
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when a stream never reaches end of stream'
+            Assert-True ($result.Output -match 'did not reach end of stream') "unexpected error text: $($result.Output)"
+            Assert-True ($stopwatch.Elapsed.TotalSeconds -lt 40) "the run waited on the open pipe: $($stopwatch.Elapsed.TotalSeconds)s"
         }
 
         Invoke-Case 'runtime: first-run profile is seeded in the sandbox and handed to the child' {

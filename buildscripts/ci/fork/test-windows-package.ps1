@@ -41,9 +41,10 @@
 #       -OutputDirectory   <logs, profile sandbox, extraction, report>
 #
 #   pwsh -File buildscripts/ci/fork/test-windows-package.ps1 -ExportProfilePlan `
-#       -SourceDirectory <checkout> -ProfileRoamingRoot <dir> -ProfileLocalRoot <dir>
-#       prints the resolved first-run profile contract as JSON. Testability hook: it applies the
-#       same hosted-runner guard and existing-profile refusal as a real run.
+#       -SourceDirectory <checkout> -OutputDirectory <dir>
+#       prints the resolved first-run profile contract for that directory's profile sandbox as
+#       JSON. Testability hook: it applies the same hosted-runner guard and existing-profile
+#       refusal as a real run, without the sandbox being recreated first.
 
 [CmdletBinding()]
 param(
@@ -54,10 +55,8 @@ param(
     [int] $ExportTimeoutSeconds = 300,
     [int] $GuiTimeoutSeconds = 600,
     # Testability hook (see the "Testability hook" section): resolves and validates the first-run
-    # profile contract for -ProfileRoamingRoot/-ProfileLocalRoot instead of running the package.
-    [switch] $ExportProfilePlan,
-    [string] $ProfileRoamingRoot = '',
-    [string] $ProfileLocalRoot = ''
+    # profile contract for the -OutputDirectory sandbox instead of running the package.
+    [switch] $ExportProfilePlan
 )
 
 $ErrorActionPreference = 'Stop'
@@ -76,6 +75,18 @@ $script:RequiredTestScripts = @(
 # <MUSE_TESTFLOW_DATA_PATH>/reports. Pointing that at the helper's own output directory
 # makes the record of the run helper-owned evidence instead of a path inside the package.
 $script:TestflowDataRelative = 'testflow-data'
+
+# Every wait in this helper is bounded. Besides the timeout of the observed process these are the
+# deadline for confirming that the termination of a timed-out process tree actually happened, and
+# the deadline for draining the child's redirected output: a descendant process that inherited the
+# pipe keeps the read open indefinitely, and a test must never wait on that.
+$script:KillTimeoutSeconds = 10
+$script:OutputDrainSeconds = 10
+
+# Profile sandbox layout used for the POSIX fixture host and for the plan testability hook; a real
+# Windows run uses the known folders instead of this sandbox (see the first-run profile section).
+$script:ProfileSandboxRoamingRelative = 'profile/AppData/Roaming'
+$script:ProfileSandboxLocalRelative = 'profile/AppData/Local'
 
 # Where the packaged application keeps its state, from this revision's own code:
 # QSettings uses IniFormat/UserScope, whose Windows path is
@@ -622,15 +633,41 @@ function New-ChildProcessStartInfo {
     }
 }
 
+function Wait-ProcessExit {
+    <#
+        Bounded wait for an exit. Returns $true only when the process is known to have exited;
+        a reaped process object is treated as exited rather than as an error.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process] $Process,
+        [Parameter(Mandatory = $true)][int] $TimeoutSeconds
+    )
+
+    try {
+        return $Process.WaitForExit($TimeoutSeconds * 1000)
+    } catch {
+        return $true
+    }
+}
+
 function Stop-ProcessTree {
+    <#
+        Terminates a process and its descendants and confirms the exit within a deadline. Returns
+        $true only when the process is known to have exited: the exit status of taskkill/pkill is
+        not treated as proof, and .NET's own tree kill is the fallback. An unconfirmed termination
+        is reported so the caller can fail the run instead of waiting on a live process.
+    #>
     param([Parameter(Mandatory = $true)][System.Diagnostics.Process] $Process)
 
     if ($Process.HasExited) {
-        return
+        return $true
     }
 
     if ($script:IsWindowsHost) {
-        & taskkill.exe /PID $Process.Id /T /F 2>&1 | Out-Null
+        $terminationOutput = & taskkill.exe /PID $Process.Id /T /F 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "   taskkill exited $LASTEXITCODE for PID $($Process.Id): $terminationOutput"
+        }
     } else {
         & pkill -TERM -P $Process.Id 2>&1 | Out-Null
         & kill -TERM $Process.Id 2>&1 | Out-Null
@@ -639,10 +676,39 @@ function Stop-ProcessTree {
         & kill -KILL $Process.Id 2>&1 | Out-Null
     }
 
+    if (Wait-ProcessExit -Process $Process -TimeoutSeconds $script:KillTimeoutSeconds) {
+        return $true
+    }
+
+    Write-Host "   termination was not confirmed within $($script:KillTimeoutSeconds)s; killing the process tree directly"
     try {
-        $Process.WaitForExit(10000) | Out-Null
+        $Process.Kill($true)
     } catch {
-        # Process already reaped.
+        Write-Host "   direct process tree kill failed: $($_.Exception.Message)"
+    }
+    return (Wait-ProcessExit -Process $Process -TimeoutSeconds $script:KillTimeoutSeconds)
+}
+
+function Read-RedirectedOutput {
+    <#
+        Reads one redirected stream to its end within a deadline. A descendant process that inherited
+        the write handle keeps the read pending, so an unfinished read is reported as incomplete
+        output instead of being waited on.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][System.Threading.Tasks.Task[string]] $Task,
+        [Parameter(Mandatory = $true)][string] $StreamName
+    )
+
+    try {
+        if ($Task.Wait([TimeSpan]::FromSeconds($script:OutputDrainSeconds))) {
+            return @{ Text = $Task.Result; Complete = $true }
+        }
+        Write-Host "   $StreamName did not reach end of stream within $($script:OutputDrainSeconds)s (a descendant process may still hold the pipe)"
+        return @{ Text = ''; Complete = $false }
+    } catch {
+        Write-Host "   reading $StreamName failed: $($_.Exception.Message)"
+        return @{ Text = ''; Complete = $false }
     }
 }
 
@@ -677,25 +743,27 @@ function Invoke-BoundedProcess {
     $stderrTask = $process.StandardError.ReadToEndAsync()
 
     $timedOut = $false
+    $terminationConfirmed = $true
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         $timedOut = $true
-        Write-Host "   TIMEOUT after ${TimeoutSeconds}s; killing process tree"
-        Stop-ProcessTree -Process $process
+        Write-Host "   TIMEOUT after ${TimeoutSeconds}s; terminating the process tree"
+        $terminationConfirmed = Stop-ProcessTree -Process $process
+        if (-not $terminationConfirmed) {
+            Add-Failure "$Name did not exit within ${TimeoutSeconds}s and its process tree could not be terminated within $($script:KillTimeoutSeconds)s; the run cannot be bounded (log $stdoutPath)"
+        }
     }
 
-    try {
-        $process.WaitForExit()
-    } catch {
-        # Already exited.
-    }
-
-    $stdout = ''
-    $stderr = ''
-    try { $stdout = $stdoutTask.GetAwaiter().GetResult() } catch { $stdout = '' }
-    try { $stderr = $stderrTask.GetAwaiter().GetResult() } catch { $stderr = '' }
+    $stdoutResult = Read-RedirectedOutput -Task $stdoutTask -StreamName 'stdout'
+    $stderrResult = Read-RedirectedOutput -Task $stderrTask -StreamName 'stderr'
+    $stdout = $stdoutResult.Text
+    $stderr = $stderrResult.Text
 
     [IO.File]::WriteAllText($stdoutPath, $stdout, [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($stderrPath, $stderr, [Text.UTF8Encoding]::new($false))
+
+    if (-not ($stdoutResult.Complete -and $stderrResult.Complete)) {
+        Add-Failure "$Name output did not reach end of stream within $($script:OutputDrainSeconds)s after the process ended; the retained logs are incomplete ($stdoutPath)"
+    }
 
     $exitCode = $null
     if (-not $timedOut) {
@@ -703,49 +771,60 @@ function Invoke-BoundedProcess {
     }
     $process.Dispose()
 
+    $terminationSummary = "process tree termination confirmed"
+    if (-not $terminationConfirmed) {
+        $terminationSummary = "process tree termination could NOT be confirmed; the run cannot be bounded"
+    }
+
     return @{
-        Name           = $Name
-        Executable     = $Executable
-        Arguments      = $Arguments
-        TimedOut       = $timedOut
-        ExitCode       = $exitCode
-        Stdout         = $stdout
-        Stderr         = $stderr
-        StdoutLog      = $stdoutPath
-        StderrLog      = $stderrPath
-        RemovedPathEntries = $startInfoResult.RemovedPathEntries
-        RemovedVariables   = $startInfoResult.RemovedVariables
+        Name                 = $Name
+        Executable           = $Executable
+        Arguments            = $Arguments
+        TimedOut             = $timedOut
+        TerminationSummary   = $terminationSummary
+        ExitCode             = $exitCode
+        Stdout               = $stdout
+        Stderr               = $stderr
+        StdoutLog            = $stdoutPath
+        StderrLog            = $stderrPath
+        RemovedPathEntries   = $startInfoResult.RemovedPathEntries
+        RemovedVariables     = $startInfoResult.RemovedVariables
     }
 }
 
 # ---------------------------------------------------------------------------
 # Testability hook: first-run profile contract
 # ---------------------------------------------------------------------------
-# Resolves and validates the profile contract exactly as a real Windows run does, but from explicit
-# known-folder roots instead of the host's own folders, so the derived profile path, the
-# hosted-runner guard and the existing-profile refusal can be exercised without a Windows runner.
-# This is not a substitute for the hosted run of the installed binary.
+# Resolves and validates the profile contract the same way a real run does - the same profile name
+# derivation, the same path layout and the same existing-profile refusal - for the profile sandbox
+# under -OutputDirectory, and prints it as JSON. This exists because the refusal and the
+# hosted-runner guard are unreachable from a POSIX fixture through the normal path (that path
+# recreates its own sandbox first) and because a wrong profile path otherwise costs a full
+# hosted build before it is detected. It is not a substitute for the hosted run of the installed
+# binary, and it exercises helper logic only - no packaged-application evidence is claimed.
 if ($ExportProfilePlan) {
     if ([string]::IsNullOrWhiteSpace($SourceDirectory)) {
         Fail '-ExportProfilePlan requires -SourceDirectory'
+    }
+    if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+        Fail '-ExportProfilePlan requires -OutputDirectory'
     }
     Assert-HostedRunnerContext
     $planVersion = Read-VersionCmake -Path (Join-Path $SourceDirectory 'version.cmake')
     if ($null -eq $planVersion) {
         Fail "-SourceDirectory does not provide version.cmake: $SourceDirectory"
     }
-    $plan = Resolve-ProfilePlan -RoamingRoot $ProfileRoamingRoot -LocalRoot $ProfileLocalRoot `
+    $sandboxRoot = Resolve-FullPath -Path $OutputDirectory
+    $plan = Resolve-ProfilePlan `
+        -RoamingRoot (Join-Path $sandboxRoot $script:ProfileSandboxRoamingRelative) `
+        -LocalRoot (Join-Path $sandboxRoot $script:ProfileSandboxLocalRelative) `
         -ProfileName (Get-DevelopmentProfileName -Version $planVersion)
     Assert-ProfilePlanUsable -Plan $plan
     ConvertTo-Json -Depth 4 -InputObject ([ordered]@{
-            profile_name         = $plan.ProfileName
-            settings_directory   = $plan.SettingsDirectory
-            settings_file        = $plan.SettingsFilePath
-            profile_directory    = $plan.ProfileDirectory
-            log_directory        = $plan.LogDirectory
-            # The roots above are only handed to a child process by the POSIX fixture sandbox; a
-            # real Windows run never redirects APPDATA/LOCALAPPDATA.
-            redirect_environment = $false
+            profile_name      = $plan.ProfileName
+            settings_file     = $plan.SettingsFilePath
+            profile_directory = $plan.ProfileDirectory
+            log_directory     = $plan.LogDirectory
         })
     exit 0
 }
@@ -962,8 +1041,8 @@ if ($script:IsWindowsHost) {
 } else {
     # Fixture host only: the sandbox stays inside -OutputDirectory and is handed to the stub through
     # APPDATA/LOCALAPPDATA. Real profile behavior is verified on the hosted Windows runner.
-    $sandboxRoaming = Join-Path $profileRoot 'AppData/Roaming'
-    $sandboxLocal = Join-Path $profileRoot 'AppData/Local'
+    $sandboxRoaming = Join-Path $outputRoot $script:ProfileSandboxRoamingRelative
+    $sandboxLocal = Join-Path $outputRoot $script:ProfileSandboxLocalRelative
     New-Item -ItemType Directory -Path $sandboxRoaming, $sandboxLocal -Force | Out-Null
     $profilePlan = Resolve-ProfilePlan -RoamingRoot $sandboxRoaming -LocalRoot $sandboxLocal `
         -ProfileName $profileName -RedirectEnvironment $true
@@ -1172,7 +1251,7 @@ foreach ($scriptName in $script:RequiredTestScripts) {
 
     $ok = $true
     if ($result.TimedOut) {
-        Add-Failure "$scriptName timed out after ${GuiTimeoutSeconds}s; process tree killed (log $($result.StdoutLog))"
+        Add-Failure "$scriptName timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
         $ok = $false
     } elseif ($result.ExitCode -ne 0) {
         Add-Failure "$scriptName failed with exit code $($result.ExitCode) (log $($result.StdoutLog))"
@@ -1290,7 +1369,7 @@ $result = Invoke-TestflowProbe -Name 'finished' -ScriptPath $probeScripts['finis
 $probeReports = @(Get-ChildItem -LiteralPath (Join-Path $finishedDataRoot 'reports') -File -ErrorAction SilentlyContinue)
 $probeOk = $false
 if ($result.TimedOut) {
-    Add-Failure "probe finished timed out after ${GuiTimeoutSeconds}s; process tree killed (log $($result.StdoutLog))"
+    Add-Failure "probe finished timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
 } elseif ($result.ExitCode -ne 0) {
     Add-Failure "probe finished: a case that finishes every step must exit 0, got $($result.ExitCode) (log $($result.StdoutLog))"
 } elseif ($probeReports.Count -ne 1) {
@@ -1316,7 +1395,7 @@ $blockedDataPath = Join-Path $probeRoot 'data-blocked'
 $result = Invoke-TestflowProbe -Name 'report-failure' -ScriptPath $probeScripts['finished'] -DataRoot $blockedDataPath
 $probeOk = $false
 if ($result.TimedOut) {
-    Add-Failure "probe report-failure timed out after ${GuiTimeoutSeconds}s; process tree killed (log $($result.StdoutLog))"
+    Add-Failure "probe report-failure timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
 } elseif ($result.ExitCode -ne 1) {
     Add-Failure "probe report-failure: expected exit 1 for a run whose report cannot be created, got exit $($result.ExitCode); a crash or unexpected exit is not a correct rejection (log $($result.StdoutLog))"
 } else {
@@ -1330,7 +1409,7 @@ $emptyDataRoot = Join-Path $probeRoot 'data-empty'
 $result = Invoke-TestflowProbe -Name 'empty' -ScriptPath $probeScripts['empty'] -DataRoot $emptyDataRoot
 $probeOk = $false
 if ($result.TimedOut) {
-    Add-Failure "probe empty timed out after ${GuiTimeoutSeconds}s; process tree killed (log $($result.StdoutLog))"
+    Add-Failure "probe empty timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
 } elseif ($result.ExitCode -ne 1) {
     Add-Failure "probe empty: expected exit 1 for a test case without steps, got exit $($result.ExitCode); a crash or unexpected exit is not a correct rejection (log $($result.StdoutLog))"
 } else {
@@ -1345,7 +1424,7 @@ $result = Invoke-TestflowProbe -Name 'aborted' -ScriptPath $probeScripts['aborte
 $probeReports = @(Get-ChildItem -LiteralPath (Join-Path $abortedDataRoot 'reports') -File -ErrorAction SilentlyContinue)
 $probeOk = $false
 if ($result.TimedOut) {
-    Add-Failure "probe aborted timed out after ${GuiTimeoutSeconds}s; process tree killed (log $($result.StdoutLog))"
+    Add-Failure "probe aborted timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
 } elseif ($result.ExitCode -ne 1) {
     Add-Failure "probe aborted: expected exit 1 for an aborted test case, got exit $($result.ExitCode); a crash or unexpected exit is not a correct rejection (log $($result.StdoutLog))"
 } elseif ($probeReports.Count -ne 1) {
