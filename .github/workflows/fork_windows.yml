@@ -324,8 +324,8 @@ jobs:
       # Reviewed fixtures only, not a compilable source tree: a full checkout beside the
       # extracted package could let the application fall back to source resources and mask a
       # missing packaged file. Only the files the runtime helper reads from -SourceDirectory are
-      # present (revision metadata, the two reviewed GUI scripts and one committed score), while
-      # .git still keeps HEAD equal to source_sha for the manifest cross-check.
+      # present (the two mandatory GUI scripts, the optional TC15 fixture and one committed score),
+      # while .git still keeps HEAD equal to source_sha for the manifest cross-check.
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
