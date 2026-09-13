@@ -175,15 +175,28 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 30
     steps:
+      # Trusted helper only: the runtime job never runs build code from the source checkout.
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.workflow_sha }}
           path: pipeline
+          sparse-checkout: buildscripts/ci/fork
           persist-credentials: false
+      # Reviewed fixtures only, not a compilable source tree: a full checkout beside the
+      # extracted package could let the application fall back to source resources and mask a
+      # missing packaged file. Only the files the runtime helper reads from -SourceDirectory are
+      # present (revision metadata, the two reviewed GUI scripts and one committed score), while
+      # .git still keeps HEAD equal to source_sha for the manifest cross-check.
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
-          path: source
+          path: fixtures
+          sparse-checkout: |
+            /version.cmake
+            /share/testflowscripts/TC11_CommandPaletteDialog.js
+            /share/testflowscripts/TC14_CommandPaletteAnnounce.js
+            /vtest/scores/layout-5.mscx
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
@@ -195,7 +208,7 @@ jobs:
         env:
           MUSE_EXPECTED_WORKFLOW_SHA: ${{ needs.preflight.outputs.workflow_sha }}
           MUSE_EXPECTED_FRAMEWORK_SHA: ${{ needs.preflight.outputs.framework_sha }}
-        run: ./pipeline/buildscripts/ci/fork/test-windows-package.ps1 -ArtifactDirectory ./package -SourceDirectory ./source -OutputDirectory './runtime results'
+        run: ./pipeline/buildscripts/ci/fork/test-windows-package.ps1 -ArtifactDirectory ./package -SourceDirectory ./fixtures -OutputDirectory './runtime results'
       - uses: actions/upload-artifact@v7
         if: always()
         with:
