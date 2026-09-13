@@ -19,7 +19,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $ProgressPreference = "SilentlyContinue"
 
-$PinnedCcacheVersion = "4.13.6"
+$PinnedCcacheVersion = "4.14"
 $encoding = New-Object System.Text.UTF8Encoding($false)
 $LogDirectory = [IO.Path]::GetFullPath($LogDirectory)
 $CcacheDirectory = [IO.Path]::GetFullPath($CcacheDirectory)
