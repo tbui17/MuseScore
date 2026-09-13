@@ -257,6 +257,7 @@ function New-FakeProvenance {
         [Parameter(Mandatory = $true)][string] $SourceSha,
         [Parameter(Mandatory = $false)][string] $WorkflowSha = 'a' * 40,
         [Parameter(Mandatory = $false)][string] $FrameworkSha = 'b' * 40,
+        [Parameter(Mandatory = $false)][string] $ApplicationVersion = '5.0.0.12345678',
         [Parameter(Mandatory = $false)][string[]] $DropKeys = @()
     )
 
@@ -269,7 +270,7 @@ function New-FakeProvenance {
         workflow_sha         = $WorkflowSha
         run_id               = '1234567890'
         run_attempt          = '1'
-        application_version  = '5.0.0.12345678'
+        application_version  = $ApplicationVersion
         channel              = 'development'
         build_type           = 'RelWithDebInfo'
         features             = [ordered]@{ audio_export = $true; braille = $true }
@@ -616,6 +617,32 @@ try {
         Assert-True ($result.Output -match "'qml'") "unexpected error text: $($result.Output)"
     }
 
+    Invoke-Case 'package: missing license notice is rejected' {
+        $root = Join-Path $WorkRoot 'pkg-missing-notice'
+        $source = Join-Path $root 'source'
+        $install = Join-Path $root 'install'
+        $artifact = Join-Path $root 'artifact'
+        New-Item -ItemType Directory -Path $artifact -Force | Out-Null
+        $head = New-FakeSource -Root $source
+        $expectations = Get-ResourceExpectations
+        $notices = @($expectations | Where-Object { ([string] $_.kind) -eq 'file' -and ([string] $_.path) -like 'licenses/*' })
+        Assert-True ($notices.Count -ge 1) 'Get-CoreResourceExpectation must require the license notice files'
+        New-FakeInstall -Root $install -Expectations $expectations -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
+        # The tree is otherwise complete, so the only reason this package can be rejected is the
+        # notice that was removed.
+        $removed = [string] $notices[0].path
+        Remove-Item -LiteralPath (Join-Path $install ($removed -replace '/', [IO.Path]::DirectorySeparatorChar)) -Force
+        New-FakeProvenance -Path (Join-Path $root 'provenance.json') -SourceSha $head
+
+        $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+            '-SourceDirectory', $source, '-InstallDirectory', $install,
+            '-OutputDirectory', $artifact, '-ProvenancePath', (Join-Path $root 'provenance.json'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when a required license notice is missing'
+        Assert-True ($result.Output -match [regex]::Escape($removed)) "unexpected error text: $($result.Output)"
+        Assert-True (@(Get-ChildItem -LiteralPath $artifact -File -ErrorAction SilentlyContinue).Count -eq 0) `
+            'a rejected package must not leave a package file behind'
+    }
+
     Invoke-Case 'package: provenance missing an identity key is rejected' {
         $root = Join-Path $WorkRoot 'pkg-missing-provenance-key'
         $source = Join-Path $root 'source'
@@ -700,6 +727,73 @@ try {
         Assert-True (@($manifest.resource_expectations) -contains 'bin/platforms/qwindows.dll') 'manifest must record the Qt platform plugin'
         Assert-True (@($manifest.resource_expectations) -contains 'testflowscripts/TC11_CommandPaletteDialog.js') 'manifest must record installed test scripts'
         Assert-True ($manifest.dependency_lock -like '*muse_framework@*') 'manifest must carry the dependency lock identity'
+
+        # The license/notice set is part of the package contract, so assert it inside the
+        # archive itself rather than only inside the install tree the fixture built from the
+        # same contract. The expected paths come from the manifest, which the helper derives
+        # from Get-CoreResourceExpectation, so the fixture cannot drift from the contract.
+        $notices = @($manifest.resource_expectations | Where-Object { $_ -like 'licenses/*' })
+        Assert-True ($notices.Count -ge 1) 'the packaging contract must require the license/notice set'
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($package.Package.FullName)
+        try {
+            $entries = @($archive.Entries | ForEach-Object { $_.FullName -replace '\\', '/' })
+        } finally {
+            $archive.Dispose()
+        }
+        $missingNotices = @($notices | Where-Object { $entries -notcontains $_ })
+        Assert-True ($missingNotices.Count -eq 0) "the package must contain every required license notice, missing: $($missingNotices -join ', ')"
+    }
+
+    Invoke-Case 'package: archive creation failure leaves no package, manifest or checksum' {
+        $root = Join-Path $WorkRoot 'pkg-archive-failure'
+        $source = Join-Path $root 'source'
+        $install = Join-Path $root 'install'
+        $artifact = Join-Path $root 'artifact'
+        New-Item -ItemType Directory -Path $artifact -Force | Out-Null
+        $head = New-FakeSource -Root $source
+        New-FakeInstall -Root $install -Expectations (Get-ResourceExpectations) -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
+        # A nonessential installed file that the resource contract does not name, so structural
+        # validation still passes and the archive step is the only stage that can fail.
+        $blocked = Join-Path $install 'extras/optional-note.txt'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $blocked) -Force | Out-Null
+        [IO.File]::WriteAllText($blocked, 'not part of the resource contract', [Text.UTF8Encoding]::new($false))
+        New-FakeProvenance -Path (Join-Path $root 'provenance.json') -SourceSha $head
+
+        # The file exists and is listed (validation reads metadata only), but the archive tool
+        # cannot read its bytes while this handle holds it with no sharing.
+        $handle = [IO.File]::Open($blocked, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+        try {
+            $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+                '-SourceDirectory', $source, '-InstallDirectory', $install,
+                '-OutputDirectory', $artifact, '-ProvenancePath', (Join-Path $root 'provenance.json'))
+        } finally {
+            $handle.Dispose()
+        }
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the archive tool cannot read an installed file'
+        Assert-True ($result.Output -match 'archive creation failed') "unexpected error text: $($result.Output)"
+        $leftovers = @(Get-ChildItem -LiteralPath $artifact -File -ErrorAction SilentlyContinue)
+        Assert-True ($leftovers.Count -eq 0) `
+            "a failed archive must not leave a package, manifest or checksum behind, found: $(($leftovers | ForEach-Object { $_.Name }) -join ', ')"
+    }
+
+    Invoke-Case 'package: provenance application_version that only shares a string prefix is rejected' {
+        $root = Join-Path $WorkRoot 'pkg-version-boundary'
+        $source = Join-Path $root 'source'
+        $install = Join-Path $root 'install'
+        $artifact = Join-Path $root 'artifact'
+        New-Item -ItemType Directory -Path $artifact -Force | Out-Null
+        $head = New-FakeSource -Root $source
+        New-FakeInstall -Root $install -Expectations (Get-ResourceExpectations) -ExecutableRelativePath 'bin/MuseScoreStudio5.exe'
+        # version.cmake derives 5.0.0; a plain prefix match would also accept 5.0.01.
+        New-FakeProvenance -Path (Join-Path $root 'provenance.json') -SourceSha $head -ApplicationVersion '5.0.01'
+
+        $result = Invoke-Helper -Script $PackageHelper -Arguments @(
+            '-SourceDirectory', $source, '-InstallDirectory', $install,
+            '-OutputDirectory', $artifact, '-ProvenancePath', (Join-Path $root 'provenance.json'))
+        Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a version that only shares a string prefix'
+        Assert-True ($result.Output -match 'application_version') "unexpected error text: $($result.Output)"
+        Assert-True (@(Get-ChildItem -LiteralPath $artifact -File -ErrorAction SilentlyContinue).Count -eq 0) `
+            'a rejected package must not leave a package file behind'
     }
 
     Invoke-Case 'package: export of resource expectations is valid JSON' {

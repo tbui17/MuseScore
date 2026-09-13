@@ -274,7 +274,50 @@ function Assert-InstallLayout {
     $qtRuntime = @($relativePaths | Where-Object { $_ -eq "Qt6Core.dll" -or $_ -like "*/Qt6Core.dll" })
     $platformPlugin = @($relativePaths | Where-Object { $_ -eq "qwindows.dll" -or $_ -like "*/qwindows.dll" })
 
+    # License and notice files are installed from the source tree (application LICENSE.txt
+    # and the framework's SetupLicenseNotices.cmake, which reads the pinned payload trees).
+    # They are part of the package contract, so a missing notice fails the build here.
+    $noticeFiles = @(
+        "licenses/LICENSE.txt"
+        "licenses/SOURCE-REFS.txt"
+        "licenses/qt/GPL-3.0-only.txt"
+        "licenses/qt/LGPL-3.0-only.txt"
+        "licenses/qt/Qt-GPL-exception-1.0.txt"
+        "licenses/fdk-aac/NOTICE"
+        "licenses/asiosdk/LICENSE.txt"
+        "licenses/harfbuzz/COPYING"
+        "licenses/kddockwidgets/LICENSE.txt"
+        "licenses/vst3sdk/base/LICENSE.txt"
+        "licenses/zlib/README"
+        "licenses/libsndfile/COPYING"
+        "licenses/openssl/LICENSE"
+        "licenses/freetype/LICENSE.TXT"
+        "licenses/fluidsynth/LICENSE"
+        "licenses/lame/COPYING"
+        "licenses/flac/COPYING.Xiph"
+        "licenses/opus/COPYING"
+        "licenses/libopusenc/COPYING"
+        "licenses/stb-vorbis/stb_vorbis.c"
+        "licenses/kors/kors_async/LICENSE"
+        "licenses/utf8cpp/LICENSE"
+        "licenses/pugixml/pugixml.hpp"
+        "licenses/picojson/picojson.h"
+        "licenses/liblouis/COPYING.LESSER"
+        "licenses/intervaltree/LICENSE"
+        "licenses/dtl/COPYING"
+        "licenses/beatroot/COPYING"
+        "licenses/rtf2html/COPYING.LESSER"
+        "licenses/fonts/bravura/OFL.txt"
+    )
+
+    # Qt attribution metadata is kit-dependent, so the exact paths are not fixed here.
+    $qtAttribution = @($relativePaths | Where-Object { $_ -like "licenses/qt-attribution/*" })
+
     $missing = @()
+    if ($qtAttribution.Count -lt 1) { $missing += "licenses/qt-attribution/* (Qt attribution metadata install rule)" }
+    foreach ($notice in $noticeFiles) {
+        if ($relativePaths -notcontains $notice) { $missing += "$notice (license install rule)" }
+    }
     if ($translations.Count -lt 1) { $missing += "locale/*.qm (lrelease install rule)" }
     if ($relativePaths -notcontains "locale/languages.json") { $missing += "locale/languages.json" }
     if ($relativePaths -notcontains "sound/MS Basic.sf3") { $missing += "sound/MS Basic.sf3 (soundfont install rule)" }
@@ -286,6 +329,7 @@ function Assert-InstallLayout {
 
     return [ordered]@{
         executable         = $ExecutableRelative
+        licenses           = $noticeFiles.Count
         translations       = $translations.Count
         languages_metadata = "locale/languages.json"
         soundfont          = "sound/MS Basic.sf3"

@@ -105,6 +105,68 @@ function Get-CoreResourceExpectation {
             description = 'Bundled soundfont (share/sound/CMakeLists.txt, MUE_INSTALL_SOUNDFONT)' }
         @{ kind = 'file'; path = 'sound/MS Basic_License.md'
             description = 'Bundled soundfont license notice' }
+        @{ kind = 'dirhas'; path = 'licenses/qt-attribution'
+            description = 'Qt attribution metadata of the shipped modules (SetupLicenseNotices.cmake, from the installed kit)' }
+        @{ kind = 'file'; path = 'licenses/LICENSE.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/SOURCE-REFS.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt/GPL-3.0-only.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt/LGPL-3.0-only.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/qt/Qt-GPL-exception-1.0.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/fdk-aac/NOTICE'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/asiosdk/LICENSE.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/harfbuzz/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/kddockwidgets/LICENSE.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/vst3sdk/base/LICENSE.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/zlib/README'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/libsndfile/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/openssl/LICENSE'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/freetype/LICENSE.TXT'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/fluidsynth/LICENSE'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/lame/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/flac/COPYING.Xiph'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/opus/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/libopusenc/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/stb-vorbis/stb_vorbis.c'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/kors/kors_async/LICENSE'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/utf8cpp/LICENSE'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/pugixml/pugixml.hpp'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/picojson/picojson.h'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/liblouis/COPYING.LESSER'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/intervaltree/LICENSE'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/dtl/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/beatroot/COPYING'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/rtf2html/COPYING.LESSER'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
+        @{ kind = 'file'; path = 'licenses/fonts/bravura/OFL.txt'
+            description = 'License or notice installed by the source tree (see SetupLicenseNotices.cmake)' }
         @{ kind = 'file'; path = 'styles/MuseJazz.mss'; description = 'Bundled style' }
         @{ kind = 'file'; path = 'templates/My_First_Score.mscx'; description = 'Bundled score template' }
         @{ kind = 'dirhas'; path = 'wallpapers'; filter = '*.png'
