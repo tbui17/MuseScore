@@ -115,8 +115,23 @@ set(MUSE_APP_UNSTABLE ON)
 
     $scriptsDir = Join-Path $Root 'share/testflowscripts'
     New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
-    foreach ($name in @('TC11_CommandPaletteDialog.js', 'TC14_CommandPaletteAnnounce.js')) {
-        [IO.File]::WriteAllText((Join-Path $scriptsDir $name), "var testCase = {};`n", [Text.UTF8Encoding]::new($false))
+    foreach ($fixtureName in $script:FixtureTestCases.Keys) {
+        $fixtureCase = $script:FixtureTestCases[$fixtureName]
+        $stepEntries = @($fixtureCase.Steps | ForEach-Object { "        {name: `"$_`", func: function() {}}" })
+        $scriptText = @"
+var testCase = {
+    name: "$($fixtureCase.Name)",
+    description: "fixture test case, not the reviewed case",
+    steps: [
+$($stepEntries -join ",`n")
+    ]
+};
+function main()
+{
+    api.testflow.runTestCase(testCase)
+}
+"@
+        [IO.File]::WriteAllText((Join-Path $scriptsDir $fixtureName), $scriptText, [Text.UTF8Encoding]::new($false))
     }
 
     $fixtureDir = Join-Path $Root 'vtest/scores'
@@ -229,6 +244,21 @@ function New-FakeProvenance {
     [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $provenance -Depth 8), [Text.UTF8Encoding]::new($false))
 }
 
+# Minimal fixture test cases standing in for the reviewed scripts. They declare the shape the
+# runtime helper reads from a reviewed script (a test case name and a nonempty ordered step
+# list) but they are deliberately not the real TC11/TC14 cases. The helper tests never claim
+# packaged-application evidence from them.
+$script:FixtureTestCases = [ordered]@{
+    'TC11_CommandPaletteDialog.js'    = @{
+        Name  = 'TC11: fixture command palette dialog'
+        Steps = @('Open command palette', 'Verify the dialog is open')
+    }
+    'TC14_CommandPaletteAnnounce.js'  = @{
+        Name  = 'TC14: fixture command palette announcement'
+        Steps = @('Open command palette', 'Navigate and announce a result')
+    }
+}
+
 $script:StubTemplate = @'
 #!/bin/sh
 case "$1" in
@@ -251,22 +281,171 @@ case "$1" in
     exit 0
     ;;
   --test-case-gui)
-    TESTFLOW_RECORD
-    exit 0
+    case "$2" in
+      *TC11_CommandPaletteDialog.js)
+        TC11_REPORT
+        ;;
+      *TC14_CommandPaletteAnnounce.js)
+        TC14_REPORT
+        ;;
+PROBE_BRANCHES
+    esac
     ;;
 esac
 exit 1
 '@
 
+function New-TestflowStubReport {
+    <#
+        Builds the shell block that stands in for Testflow::runTestCase()/TestCaseReport for one
+        fixture test script. It writes the same report shape the application writes under
+        $MUSE_TESTFLOW_DATA_PATH/reports, so the runtime helper's report validation can be
+        exercised without the application; $ReportMode selects the defect it reproduces.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string] $ScriptFileName,
+        [Parameter(Mandatory = $true)][string] $ReportMode
+    )
+
+    $fixtureCase = $script:FixtureTestCases[$ScriptFileName]
+    $safeName = ($fixtureCase.Name -replace '[^A-Za-z0-9]+', '_').Trim('_')
+    $reportFile = '$MUSE_TESTFLOW_DATA_PATH/reports/' + $safeName + '_250101000000.txt'
+
+    $body = @()
+    switch ($ReportMode) {
+        'Missing' {
+            # No reports directory at all, while the stub still exits 0: the behaviour a zero
+            # exit status alone cannot distinguish from a test case that ran.
+            $body += ':'
+        }
+        'DirectoryOnly' {
+            $body += 'mkdir -p "$MUSE_TESTFLOW_DATA_PATH/reports"'
+        }
+        default {
+            $reportLines = @()
+            $reportLines += "Test: $($fixtureCase.Name)"
+            $reportLines += 'date: 2026.01.01 00:00'
+            if ($ReportMode -eq 'Empty') {
+                $reportLines += 'steps: '
+            } else {
+                $reportLines += "steps: $($fixtureCase.Steps -join ' -> ')"
+                $reportLines += ''
+                if ($ReportMode -eq 'Incomplete') {
+                    $reportLines += "  started step: $($fixtureCase.Steps[0])"
+                    $reportLines += "  finished step: $($fixtureCase.Steps[0]) [10 msec]"
+                } elseif ($ReportMode -eq 'Aborted') {
+                    $reportLines += "  started step: $($fixtureCase.Steps[0])"
+                    $reportLines += "  finished step: $($fixtureCase.Steps[0]) [10 msec]"
+                    $reportLines += "  started step: $($fixtureCase.Steps[1])"
+                    $reportLines += "  abort step: $($fixtureCase.Steps[1])"
+                    $reportLines += 'Test case aborted!'
+                } else {
+                    foreach ($step in $fixtureCase.Steps) {
+                        $reportLines += "  started step: $step"
+                        $reportLines += "  finished step: $step [10 msec]"
+                    }
+                }
+            }
+
+            $body += 'mkdir -p "$MUSE_TESTFLOW_DATA_PATH/reports"'
+            $body += "cat > `"$reportFile`" <<'REPORT_EOF'"
+            $body += ($reportLines -join "`n")
+            $body += 'REPORT_EOF'
+        }
+    }
+
+    # Every mode still exits 0: the defect is in the report, not in the exit status.
+    $body += 'exit 0'
+    return ($body -join "`n")
+}
+
+function New-TestflowProbeStubBranches {
+    <#
+        Builds the --test-case-gui branches that answer the runtime helper's source-semantics
+        probes the way the fixed application does. $Broken answers every probe with success and
+        no report, which the helper's probe checks must reject; $UnexpectedExit keeps the
+        reports but replaces the expected exit 1 of a rejection with exit 3, standing in for a
+        crash or an unexpected exit status that must not count as a correct rejection.
+    #>
+    param(
+        [switch] $Broken,
+        [switch] $UnexpectedExit
+    )
+
+    if ($Broken) {
+        return (@(
+            '      *empty.js)'
+            '        exit 0'
+            '        ;;'
+            '      *aborted.js)'
+            '        exit 0'
+            '        ;;'
+            '      *finished.js)'
+            '        exit 0'
+            '        ;;'
+            '      *)'
+            '        exit 1'
+            '        ;;'
+        ) -join "`n")
+    }
+
+    $branches = @'
+      *empty.js)
+        # The fixed application refuses a test case without steps.
+        exit 1
+        ;;
+      *aborted.js)
+        mkdir -p "$MUSE_TESTFLOW_DATA_PATH/reports" || exit 1
+        cat > "$MUSE_TESTFLOW_DATA_PATH/reports/helper_probe_aborted_case_250101000000.txt" <<'PROBE_REPORT'
+Test: helper probe: aborted case
+date: 2026.01.01 00:00
+steps: Abort the run
+
+  started step: Abort the run
+  abort step: Abort the run
+Test case aborted!
+PROBE_REPORT
+        exit 1
+        ;;
+      *finished.js)
+        # The report cannot be created when the data path is an existing file.
+        mkdir -p "$MUSE_TESTFLOW_DATA_PATH/reports" || exit 1
+        cat > "$MUSE_TESTFLOW_DATA_PATH/reports/helper_probe_trivially_finished_case_250101000000.txt" <<'PROBE_REPORT'
+Test: helper probe: trivially finished case
+date: 2026.01.01 00:00
+steps: Trivial step
+
+  started step: Trivial step
+  finished step: Trivial step [10 msec]
+PROBE_REPORT
+        exit 0
+        ;;
+      *)
+        exit 1
+        ;;
+'@
+
+    if ($UnexpectedExit) {
+        return $branches.Replace('exit 1', 'exit 3')
+    }
+
+    return $branches
+}
+
 function New-StubBody {
     <#
         POSIX stub standing in for the packaged application: it answers --version, writes a
-        real PDF and a real one-entry ZIP for -o, and records a testflow report for
-        --test-case-gui, unless a switch asks it to reproduce a specific failure mode.
+        real PDF and a real one-entry ZIP for -o, and answers --test-case-gui with the report
+        files and probe outcomes the fixed application produces. $ReportMode replaces the
+        fixture test case reports with a defect the runtime helper must reject; a switch asks
+        it to reproduce another failure mode.
     #>
     param(
-        [switch] $WithoutTestflowRecord,
-        [switch] $InvalidPdf
+        [ValidateSet('Valid', 'Missing', 'DirectoryOnly', 'Empty', 'Incomplete', 'Aborted')]
+        [string] $ReportMode = 'Valid',
+        [switch] $InvalidPdf,
+        [switch] $BrokenProbes,
+        [switch] $UnexpectedProbeExit
     )
 
     $pdfWriter = if ($InvalidPdf) {
@@ -279,9 +458,14 @@ trailer<<>>
 '' > "$2"'
     }
     $zipWriter = 'python3 -c ''import sys, zipfile; archive = zipfile.ZipFile(sys.argv[1], "w"); archive.writestr("stub-score.mscx", "<museScore/>"); archive.close()'' "$2"'
-    $testflowRecord = if ($WithoutTestflowRecord) { ':' } else { 'mkdir -p "$MUSE_TESTFLOW_DATA_PATH/reports"' }
+    $stub = $script:StubTemplate.Replace('PDF_WRITER', $pdfWriter).Replace('ZIP_WRITER', $zipWriter)
+    $stub = $stub.Replace('PROBE_BRANCHES', (New-TestflowProbeStubBranches -Broken:$BrokenProbes -UnexpectedExit:$UnexpectedProbeExit))
+    foreach ($scriptFileName in $script:FixtureTestCases.Keys) {
+        $placeholder = ($scriptFileName -replace '_CommandPalette.*', '') + '_REPORT'
+        $stub = $stub.Replace($placeholder, (New-TestflowStubReport -ScriptFileName $scriptFileName -ReportMode $ReportMode))
+    }
 
-    return $script:StubTemplate.Replace('PDF_WRITER', $pdfWriter).Replace('ZIP_WRITER', $zipWriter).Replace('TESTFLOW_RECORD', $testflowRecord)
+    return $stub
 }
 
 function Get-PackageFile {
@@ -570,6 +754,13 @@ try {
         Skip-Case 'runtime: nonzero exit fails the run' $executionSkipReason
         Skip-Case 'runtime: hang is killed and reported as a timeout' $executionSkipReason
         Skip-Case 'runtime: stub application passes version/export/GUI checks' $executionSkipReason
+        Skip-Case "runtime: GUI run with a 'Missing' testflow report fails" $executionSkipReason
+        Skip-Case "runtime: GUI run with a 'DirectoryOnly' testflow report fails" $executionSkipReason
+        Skip-Case "runtime: GUI run with a 'Empty' testflow report fails" $executionSkipReason
+        Skip-Case "runtime: GUI run with a 'Incomplete' testflow report fails" $executionSkipReason
+        Skip-Case "runtime: GUI run with a 'Aborted' testflow report fails" $executionSkipReason
+        Skip-Case 'runtime: probes that report success without evidence fail the run' $executionSkipReason
+        Skip-Case 'runtime: probe with an unexpected exit status is not a correct rejection' $executionSkipReason
     } else {
         Invoke-Case 'runtime: missing installed test script fails the run' {
             $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-missing-test')
@@ -698,21 +889,70 @@ try {
             Assert-True ($result.Output -match 'is not a PDF document') "unexpected error text: $($result.Output)"
         }
 
-        Invoke-Case 'runtime: GUI run without a recorded testflow test case fails' {
-            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-no-record')
+        # A zero exit status is only acceptable together with a report that proves the reviewed
+        # test case ran; each mode reproduces one report defect the helper must reject.
+        $reportNegatives = @(
+            @{ Root = 'rt-report-missing'; Mode = 'Missing'; Expect = 'recorded 0 testflow report file' }
+            @{ Root = 'rt-report-directory-only'; Mode = 'DirectoryOnly'; Expect = 'recorded 0 testflow report file' }
+            @{ Root = 'rt-report-empty'; Mode = 'Empty'; Expect = 'declares no steps' }
+            @{ Root = 'rt-report-incomplete'; Mode = 'Incomplete'; Expect = 'records 1 finished steps' }
+            @{ Root = 'rt-report-aborted'; Mode = 'Aborted'; Expect = 'records an unsuccessful step' }
+        )
+        foreach ($reportNegative in $reportNegatives) {
+            Invoke-Case "runtime: GUI run with a '$($reportNegative.Mode)' testflow report fails" {
+                $package = New-FakePackage -Root (Join-Path $WorkRoot $reportNegative.Root)
+                $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+                [IO.File]::WriteAllText($stub, (New-StubBody -ReportMode $reportNegative.Mode) + "`n", [Text.UTF8Encoding]::new($false))
+                & chmod +x $stub
+                & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                    -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+                Assert-True ($LASTEXITCODE -eq 0) "re-packaging with the $($reportNegative.Mode) stub failed"
+
+                $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                    '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                    '-OutputDirectory', (Join-Path $WorkRoot ($reportNegative.Root + '-out')),
+                    '-VersionTimeoutSeconds', '15', '-ExportTimeoutSeconds', '15', '-GuiTimeoutSeconds', '30')
+                Assert-True ($result.ExitCode -ne 0) "expected a nonzero exit for report mode $($reportNegative.Mode)"
+                Assert-True ($result.Output -match $reportNegative.Expect) "unexpected error text for $($reportNegative.Mode): $($result.Output)"
+            }
+        }
+
+        # The probes must really run: a stub that answers every probe with success and no
+        # evidence must fail the run instead of passing silently.
+        Invoke-Case 'runtime: probes that report success without evidence fail the run' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-broken-probes')
             $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
-            [IO.File]::WriteAllText($stub, (New-StubBody -WithoutTestflowRecord) + "`n", [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($stub, (New-StubBody -BrokenProbes) + "`n", [Text.UTF8Encoding]::new($false))
             & chmod +x $stub
             & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
                 -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
-            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the record-less stub failed'
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the broken-probe stub failed'
 
             $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
                 '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
-                '-OutputDirectory', (Join-Path $WorkRoot 'rt-no-record-out'),
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-broken-probes-out'),
                 '-VersionTimeoutSeconds', '15', '-ExportTimeoutSeconds', '15', '-GuiTimeoutSeconds', '30')
-            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the runner records no test case'
-            Assert-True ($result.Output -match 'without the testflow runner recording a test case') "unexpected error text: $($result.Output)"
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the probes see no evidence'
+            Assert-True ($result.Output -match 'probe finished: expected one report') "unexpected error text: $($result.Output)"
+        }
+
+        # A rejection probe must fail for the right reason: an unexpected exit status (a crash
+        # or an abnormal termination) is not the exit 1 the GUI runner uses for a rejected run.
+        Invoke-Case 'runtime: probe with an unexpected exit status is not a correct rejection' {
+            $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-unexpected-probe-exit')
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, (New-StubBody -UnexpectedProbeExit) + "`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging with the unexpected-exit stub failed'
+
+            $result = Invoke-Helper -Script $RuntimeHelper -Arguments @(
+                '-ArtifactDirectory', $package.Artifact, '-SourceDirectory', $package.Source,
+                '-OutputDirectory', (Join-Path $WorkRoot 'rt-unexpected-probe-exit-out'),
+                '-VersionTimeoutSeconds', '15', '-ExportTimeoutSeconds', '15', '-GuiTimeoutSeconds', '30')
+            Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when a rejection probe exits unexpectedly'
+            Assert-True ($result.Output -match 'expected exit 1') "unexpected error text: $($result.Output)"
         }
 
         Invoke-Case 'runtime: missing reviewed source script fails instead of falling back' {
