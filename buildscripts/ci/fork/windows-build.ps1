@@ -489,16 +489,18 @@ Write-Host "ninja: $ninjaPath ($ninjaVersion)"
 
 Write-Step "Resolving Qt"
 $qtRoot = Resolve-QtRoot
-$qtVersionFile = Join-Path $qtRoot "lib\cmake\Qt6\Qt6ConfigVersion.cmake"
-$qtVersionMatch = [regex]::Match((Get-Content -LiteralPath $qtVersionFile -Raw), 'PACKAGE_VERSION\s+"([0-9][^"]*)"')
-if (-not $qtVersionMatch.Success) {
-    throw "Could not read the Qt version from '$qtVersionFile'."
-}
-$qtVersion = $qtVersionMatch.Groups[1].Value
-foreach ($qtTool in @("windeployqt.exe", "lrelease.exe")) {
+foreach ($qtTool in @("qmake.exe", "windeployqt.exe", "lrelease.exe")) {
     if (-not (Test-Path -LiteralPath (Join-Path $qtRoot "bin\$qtTool"))) {
         throw "Qt tool '$qtTool' was not found in '$qtRoot\bin'; Qt 6 with deployment and linguist tools is required."
     }
+}
+
+# The installed CLI is the authoritative, version-format-independent source: Qt 6.10 moved
+# PACKAGE_VERSION out of Qt6ConfigVersion.cmake into a separate included file, so the generated
+# CMake files are no longer parsed here.
+$qtVersion = Get-ReportedVersion -FilePath (Join-Path $qtRoot "bin\qmake.exe") -VersionArguments @("-query", "QT_VERSION")
+if (-not $qtVersion) {
+    throw "qmake -query QT_VERSION reported no version from '$qtRoot\bin\qmake.exe'."
 }
 
 # CMake finds Qt through CMAKE_PREFIX_PATH; the driver stays free of Qt flags.
