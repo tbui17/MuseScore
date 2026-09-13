@@ -175,6 +175,17 @@ jobs:
             throw "Pinned ccache reported an unexpected version (exit $reportedExitCode): $reported"
           }
           Write-Host "Pinned ccache $reportedVersion from verified $archive"
+      - name: Prove pinned ccache MSVC PCH support
+        if: needs.preflight.outputs.effective_use_cache == 'true'
+        shell: pwsh
+        working-directory: pipeline
+        run: |
+          & pwsh -NoProfile -NonInteractive -File buildscripts/ci/fork/tests/ccache-pch-probe.ps1 `
+            -CcacheDirectory ../build-output/ccache `
+            -LogDirectory ../build-output/logs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Pinned ccache MSVC PCH probe failed with exit code $LASTEXITCODE"
+          }
       - name: Resolve cache identity from native toolchain
         id: cache_identity
         if: needs.preflight.outputs.effective_use_cache == 'true'
