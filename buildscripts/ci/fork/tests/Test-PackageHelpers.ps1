@@ -1065,6 +1065,13 @@ try {
 
         Invoke-Case 'runtime: source-present TC15 missing installed script fails' {
             $package = New-FakePackage -Root (Join-Path $WorkRoot 'rt-missing-feature-test') -IncludeFeatureTest
+            $stub = Join-Path $package.Install 'bin/MuseScoreStudio5.exe'
+            [IO.File]::WriteAllText($stub, (New-StubBody) + "`n", [Text.UTF8Encoding]::new($false))
+            & chmod +x $stub
+            & pwsh -NoProfile -NonInteractive -File $PackageHelper -SourceDirectory $package.Source `
+                -InstallDirectory $package.Install -OutputDirectory $package.Artifact -ProvenancePath $package.Provenance | Out-Null
+            Assert-True ($LASTEXITCODE -eq 0) 're-packaging the feature fixture with the passing stub failed'
+
             $packagePath = $package.Package.FullName
             $missingPath = "testflowscripts/$($script:FeatureFixtureName)"
             $archive = [System.IO.Compression.ZipFile]::Open($packagePath, [System.IO.Compression.ZipArchiveMode]::Update)
@@ -1081,6 +1088,7 @@ try {
             $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
             $manifest.package.size = $newSize
             $manifest.package.sha256 = $newSha
+            $manifest.resource_expectations = @($manifest.resource_expectations | Where-Object { $_ -ne $missingPath })
             [IO.File]::WriteAllText($manifestPath, (ConvertTo-Json -InputObject $manifest -Depth 10), [Text.UTF8Encoding]::new($false))
             [IO.File]::WriteAllText((Join-Path $package.Artifact 'SHA256SUMS.txt'), "$newSha  $($package.Package.Name)`n", [Text.UTF8Encoding]::new($false))
 
@@ -1089,8 +1097,15 @@ try {
                 '-OutputDirectory', (Join-Path $WorkRoot 'rt-missing-feature-test-out'),
                 '-VersionTimeoutSeconds', '10', '-ExportTimeoutSeconds', '10', '-GuiTimeoutSeconds', '10')
             Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit when the selected TC15 script is absent from the package'
-            Assert-True ($result.Output -match [regex]::Escape("does not contain the installed test script $missingPath")) `
-                "unexpected error text: $($result.Output)"
+            $reportPath = Join-Path $WorkRoot 'rt-missing-feature-test-out/logs/runtime-tests.json'
+            Assert-True (Test-Path -LiteralPath $reportPath) 'runtime helper must retain the report when the selected feature script is absent'
+            $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+            $guiResults = @($report | Where-Object { $_.name -like 'TC*.js' })
+            Assert-True ($guiResults.Count -eq 2) "TC11/TC14 should be the only recorded GUI results before TC15 is rejected, found: $($guiResults.name -join ', ')"
+            foreach ($guiResult in $guiResults) {
+                Assert-True ([bool] $guiResult.ok -and [int] $guiResult.exit_code -eq 0) `
+                    "$($guiResult.name) must pass before the missing TC15 fixture is rejected"
+            }
         }
 
         Invoke-Case 'runtime: --version with no output is not a pass' {
