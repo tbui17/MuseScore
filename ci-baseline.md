@@ -49,8 +49,31 @@ Repairs made after the initial helper work, each verified locally:
 - Runtime acceptance now requires the reviewed GUI script from the source checkout (no packaged-copy fallback), a testflow record for the executed test case, a real PDF document, and a score container opened as a ZIP carrying score XML; the manifest executable is bounded and re-derived from `version.cmake`.
 - Test integrity fixes in the helper suites (they had never been run): per-test fixture directories, because a reused fixture repository made the fixture commit a no-op; a PowerShell array-literal precedence bug (`"0" * 40` inside `@(...)` multiplied the argument array); and one wording-only assertion replaced by an observable check (nonzero exit and no package file left behind).
 
+## Hosted evidence (2026-09-13)
+
+The application branch reached the remote and hosted runs exist. HTTPS pushes of `.github/workflows/*` were rejected by the `workflow` token scope; pushing with the owner's existing SSH key succeeded (`git push git@github.com:tbui17/MuseScore.git ci/fork-windows-releases:ci/fork-windows-releases`), with no force update.
+
+| Run | Revision | Observed |
+|---|---|---|
+| [34774152405](https://github.com/tbui17/MuseScore/actions/runs/34774152405) | `c32544bc6862b6ce1aebc68652bc3fe8a978dff8` | Failed in 24 s: the hosted actionlint runs with shellcheck, which flagged pre-existing unquoted variables in the modified unit-test workflow. Repaired in `5a1ae121bff38b28e84dbf8447a557635533d6ea`. |
+| [34774233853](https://github.com/tbui17/MuseScore/actions/runs/34774233853) | `5a1ae121bff38b28e84dbf8447a557635533d6ea` | `preflight` passed in 2 m 2 s with the hosted toolchain (actionlint + shellcheck, Python unittest, Pester 5.7.1, fork submodule policy, framework dependency-loader tests). `windows` failed in 2 m 0 s at `Full desktop configure, compile and install`. `units` was still running when this row was recorded; `runtime` is blocked by `windows`. |
+
+First fatal, durable excerpt (the full job log stays outside the repository):
+
+```text
+== Resolving Qt
+Exception: .../pipeline/buildscripts/ci/fork/windows-build.ps1:495
+  | throw "Could not read the Qt version from '$qtVersionFile'."
+  | Could not read the Qt version from 'D:\a\MuseScore\Qt\6.10.2\msvc2022_64\lib\cmake\Qt6\Qt6ConfigVersion.cmake'.
+##[error]Process completed with exit code 1.
+```
+
+Qt 6.10 no longer keeps the `PACKAGE_VERSION` literal in `Qt6ConfigVersion.cmake` (that file now includes the generated `Qt6ConfigVersionImpl.cmake`), so the previous file parse could not work. The helper now resolves the version from the installed CLI (`bin\qmake.exe -query QT_VERSION`, confirmed present in the runner's Qt 6.10.2 install log) and fails fast when it reports nothing; no generated CMake version file is parsed. Local proof of the repair: focused fake-qmake fixtures 5/5 and `windows-build.tests.ps1` 12 passed / 0 failed / 1 skipped. The hosted build still did not reach CMake configure.
+
+Helper fixtures are synthetic (fake package trees and stub executables); they are never evidence that a real MuseScore binary builds, launches or exports.
+
 ## Blocked milestones
 
-1. **Workflow-scope token.** Pushing commits that add or modify `.github/workflows/*` is expected to be rejected by GitHub, because the authenticated token's scopes omit `workflow`. Exact owner action on rejection: re-authorise the token with `workflow` scope (or push those paths with an SSH key / a token that has it), then re-run the push. Until then the app branch cannot reach the remote and no hosted run can start.
-2. **Cold hosted qualification** (and every later gate) is unproven until that push lands and `Fork Windows` runs. `use_cache=true` is therefore refused by preflight rather than accepted and ignored.
+1. **Workflow-scope token (resolved for this branch).** HTTPS pushes that add or modify `.github/workflows/*` are rejected because the token's scopes omit `workflow`; the owner's existing SSH key pushed the branch instead (`git push git@github.com:tbui17/MuseScore.git ci/fork-windows-releases:ci/fork-windows-releases`, no force update). Future workflow-file pushes need the same path or a re-authorised token.
+2. **Cold hosted qualification** remains unproven: hosted `preflight` is green and the first hosted `windows` failure (Qt version parsing) is repaired, but no hosted configure/build/install/package has completed yet. `use_cache=true` is therefore refused by preflight rather than accepted and ignored.
 3. **Merge approval.** Merging the framework PR or the application branch into `main` is an owner decision; this work does not merge. The draft-release path additionally needs the workflow to run from `main` with a source commit already in `main`.
