@@ -248,12 +248,46 @@ function Get-ConfigureArgs {
             "-DCMAKE_C_COMPILER_LAUNCHER=ccache"
         )
     }
+    else {
+        # Cache-off contract: the framework gates its own cache discovery
+        # (SetupCompilerCache.cmake, which finds ccache/sccache/buildcache on PATH
+        # regardless of any launcher set here) on this option. Passing it explicitly
+        # keeps a cold build cold; Assert-NoCompilerCacheConfigured then verifies the
+        # generated Ninja files before anything is compiled.
+        $args += "-DMUSE_COMPILE_USE_COMPILER_CACHE=OFF"
+    }
 
     if ($CMakeMakeProgramOverride) {
         $args += "-DCMAKE_MAKE_PROGRAM=$CMakeMakeProgramOverride"
     }
 
     return $args
+}
+
+function Assert-NoCompilerCacheConfigured {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $BuildDir,
+
+        [Parameter(Mandatory = $true)]
+        [bool] $CacheDisabled
+    )
+
+    if (-not $CacheDisabled) {
+        return
+    }
+
+    $launcherPattern = '(^|\s|\\)(ccache|sccache|buildcache)(\.exe)?(\s|$)'
+    foreach ($relativePath in @("build.ninja", "rules.ninja", "CMakeFiles\rules.ninja")) {
+        $file = Join-Path $BuildDir $relativePath
+        if (-not (Test-Path -LiteralPath $file)) {
+            continue
+        }
+
+        if (Select-String -LiteralPath $file -Pattern $launcherPattern -Quiet) {
+            throw "Compiler caching was configured in '$file' although ccache is disabled. Re-run with MUSESCORE_USE_CCACHE=ON, or remove ccache/sccache/buildcache from PATH."
+        }
+    }
 }
 
 function Start-Build {
@@ -267,6 +301,7 @@ function Start-Build {
 
     New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
     Invoke-CheckedCommand -FilePath "cmake" -Arguments (Get-ConfigureArgs -BuildType $BuildType -BuildDir $BuildDir) -WorkingDirectory $RepoRoot
+    Assert-NoCompilerCacheConfigured -BuildDir $BuildDir -CacheDisabled ($MuseScoreUseCcache -ne "ON")
     $buildArgs = @("--build", $BuildDir, "--parallel", "$Jobs")
     if ($BuildTarget) {
         $buildArgs += @("--target", $BuildTarget)
