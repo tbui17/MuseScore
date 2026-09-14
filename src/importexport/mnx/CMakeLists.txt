@@ -24,6 +24,14 @@ else()
     FetchContent_MakeAvailable(mnxdom)
     set(MNXDOM_LIB mnxdom)
     message(STATUS "Using fetched mnxdom")
+
+    if (MUSE_APP_INSTALL_RESOURCES_LOCATION)
+        # mnxdom is MIT licensed (LICENSE at the repository root). Its GIT_TAG is the immutable
+        # commit e7c947bf768caccf315426dcae0dfac02caf738b, so the notice is installed from the
+        # fetched tree at exactly the revision that is compiled in.
+        include(SetupLicenseNotices)
+        muse_install_license_notice(mnxdom "${mnxdom_SOURCE_DIR}" "LICENSE")
+    endif()
 endif()
 
 target_sources(iex_mnx PRIVATE

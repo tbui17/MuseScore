@@ -41,6 +41,11 @@ target_sources(iex_midi PRIVATE
 
 add_subdirectory(thirdparty/beatroot)
 
+if (MUSE_APP_INSTALL_RESOURCES_LOCATION)
+    include(SetupLicenseNotices)
+    muse_install_license_notice(beatroot "${CMAKE_CURRENT_LIST_DIR}/thirdparty/beatroot" "COPYING")
+endif()
+
 target_link_libraries(iex_midi PRIVATE
     beatroot
     engraving

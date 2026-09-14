@@ -28,6 +28,27 @@ muse_module_add_qrc(engraving
     data/fonts/fonts_Smufl.qrc
 )
 
+if (MUSE_APP_INSTALL_RESOURCES_LOCATION)
+    # Header-only third party compiled into engraving, plus the fonts embedded through qrc:
+    # the license files of every font family whose files ship inside the executable. The
+    # FreeFont family at the fonts root has no adjacent license file (recorded gap).
+    include(SetupLicenseNotices)
+    muse_install_license_notice(intervaltree "${CMAKE_CURRENT_LIST_DIR}/thirdparty/intervaltree" "LICENSE")
+    muse_install_license_notice(dtl "${CMAKE_CURRENT_LIST_DIR}/thirdparty/dtl" "COPYING")
+    muse_install_license_notice(fonts "${PROJECT_SOURCE_DIR}/fonts"
+        "README.md"
+        "bravura/OFL.txt" "bravura/LICENSE.txt" "bravura/OFL-FAQ.txt"
+        "campania/LICENSE"
+        "edwin/LICENSE.txt" "edwin/OFL-FAQ.txt"
+        "finalebroadway/OFL.txt"
+        "finalemaestro/OFL.txt"
+        "gootville/readme.txt"
+        "leland/LICENSE.txt" "leland/OFL-FAQ.txt"
+        "musejazz/OFL.txt"
+        "petaluma/OFL.txt" "petaluma/OFL-FAQ.txt"
+    )
+endif()
+
 # TODO: convert to target-based variant of qt_add_resources
 muse_module_add_qrc(engraving BIG_RESOURCES
     data/fonts/fonts_Bravura.qrc
