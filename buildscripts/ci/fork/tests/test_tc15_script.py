@@ -32,12 +32,24 @@ class TC15ScriptContractTests(unittest.TestCase):
         )
         self.assertEqual(step_names, EXPECTED_STEPS)
 
-    def test_wait_uses_enabled_navigation_nodes_and_explicit_budget(self):
+    def test_wait_uses_stable_navigation_probe_and_explicit_budget(self):
         self.assertIn("var NAVIGATION_READY_TIMEOUT_MSEC = 30000", self.source)
         self.assertIn("var NAVIGATION_READY_POLL_MSEC = 100", self.source)
-        self.assertIn("api.navigation.panels(sectionName)", self.source)
-        self.assertIn("api.navigation.controls(sectionName, panelName)", self.source)
-        self.assertIn("was not ready within \" + NAVIGATION_READY_TIMEOUT_MSEC", self.source)
+        self.assertIn(
+            "return api.navigation.goToControl(sectionName, panelName, controlName)",
+            self.source,
+        )
+        self.assertIn(
+            "api.testflow.seeChanges(NAVIGATION_READY_POLL_MSEC)",
+            self.source,
+        )
+        self.assertIn(
+            "was not available within \" + NAVIGATION_READY_TIMEOUT_MSEC",
+            self.source,
+        )
+        self.assertNotIn("api.navigation.panels(", self.source)
+        self.assertNotIn("api.navigation.controls(", self.source)
+        self.assertNotIn("api.testflow.sleep(", self.source)
         self.assertIn(
             'waitForNavigationControl("NewScoreDialog", "BottomPanel", "Done")',
             self.source,

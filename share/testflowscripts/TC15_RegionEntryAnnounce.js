@@ -3,66 +3,26 @@ var Home = require("steps/Home.js")
 var NAVIGATION_READY_TIMEOUT_MSEC = 30000
 var NAVIGATION_READY_POLL_MSEC = 100
 
-function navigationControlState(sectionName, panelName, controlName)
+function navigationControlAvailable(sectionName, panelName, controlName)
 {
-    var activeSection = api.navigation.activeSection()
-    var activePanel = api.navigation.activePanel()
-    var activeControl = api.navigation.activeControl()
+    return api.navigation.goToControl(sectionName, panelName, controlName)
+}
 
-    if (activeSection !== sectionName) {
-        return {
-            ready: false,
-            message: "active path is " + activeSection + "/" + activePanel + "/" + activeControl
+function waitForNavigationControl(sectionName, panelName, controlName)
+{
+    var waitAttempts = NAVIGATION_READY_TIMEOUT_MSEC / NAVIGATION_READY_POLL_MSEC
+    var controlAvailable = false
+    for (var i = 0; i < waitAttempts; ++i) {
+        controlAvailable = navigationControlAvailable(sectionName, panelName, controlName)
+        if (controlAvailable) {
+            return
         }
+        api.testflow.seeChanges(NAVIGATION_READY_POLL_MSEC)
     }
 
-    var panels = api.navigation.panels(sectionName)
-    var panel = null
-    for (var i = 0; i < panels.length; ++i) {
-        if (panels[i].name === panelName) {
-            panel = panels[i]
-            break
-        }
-    }
-
-    if (!panel) {
-        return {
-            ready: false,
-            message: "panel " + panelName + " is missing from section " + sectionName
-        }
-    }
-
-    if (!panel.enabled) {
-        return {
-            ready: false,
-            message: "panel " + sectionName + "/" + panelName + " is disabled"
-        }
-    }
-
-    var controls = api.navigation.controls(sectionName, panelName)
-    var control = null
-    for (var j = 0; j < controls.length; ++j) {
-        if (controls[j].name === controlName) {
-            control = controls[j]
-            break
-        }
-    }
-
-    if (!control) {
-        return {
-            ready: false,
-            message: "control " + controlName + " is missing from " + sectionName + "/" + panelName
-        }
-    }
-
-    if (!control.enabled) {
-        return {
-            ready: false,
-            message: "control " + sectionName + "/" + panelName + "/" + controlName + " is disabled"
-        }
-    }
-
-    return {ready: true, message: ""}
+    api.testflow.fatal("Navigation control " + sectionName + "/" + panelName + "/" + controlName
+                       + " was not available within " + NAVIGATION_READY_TIMEOUT_MSEC
+                       + " msec: api.navigation.goToControl returned false")
 }
 
 function waitForNavigationControl(sectionName, panelName, controlName)
