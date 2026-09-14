@@ -37,7 +37,7 @@ var testCase = {
             api.testflow.seeChanges()
         }},
         {name: "Create score", func: function() {
-            NewScore.done()
+            api.keyboard.key("Return")
             api.testflow.seeChanges(2000)
         }},
         {name: "Wait for notation page to settle", func: function() {
