@@ -1,5 +1,86 @@
 var NewScore = require("steps/NewScore.js")
 var Home = require("steps/Home.js")
+var NAVIGATION_READY_TIMEOUT_MSEC = 30000
+var NAVIGATION_READY_POLL_MSEC = 100
+
+function navigationControlState(sectionName, panelName, controlName)
+{
+    var activeSection = api.navigation.activeSection()
+    var activePanel = api.navigation.activePanel()
+    var activeControl = api.navigation.activeControl()
+
+    if (activeSection !== sectionName) {
+        return {
+            ready: false,
+            message: "active path is " + activeSection + "/" + activePanel + "/" + activeControl
+        }
+    }
+
+    var panels = api.navigation.panels(sectionName)
+    var panel = null
+    for (var i = 0; i < panels.length; ++i) {
+        if (panels[i].name === panelName) {
+            panel = panels[i]
+            break
+        }
+    }
+
+    if (!panel) {
+        return {
+            ready: false,
+            message: "panel " + panelName + " is missing from section " + sectionName
+        }
+    }
+
+    if (!panel.enabled) {
+        return {
+            ready: false,
+            message: "panel " + sectionName + "/" + panelName + " is disabled"
+        }
+    }
+
+    var controls = api.navigation.controls(sectionName, panelName)
+    var control = null
+    for (var j = 0; j < controls.length; ++j) {
+        if (controls[j].name === controlName) {
+            control = controls[j]
+            break
+        }
+    }
+
+    if (!control) {
+        return {
+            ready: false,
+            message: "control " + controlName + " is missing from " + sectionName + "/" + panelName
+        }
+    }
+
+    if (!control.enabled) {
+        return {
+            ready: false,
+            message: "control " + sectionName + "/" + panelName + "/" + controlName + " is disabled"
+        }
+    }
+
+    return {ready: true, message: ""}
+}
+
+function waitForNavigationControl(sectionName, panelName, controlName)
+{
+    var waitAttempts = NAVIGATION_READY_TIMEOUT_MSEC / NAVIGATION_READY_POLL_MSEC
+    var lastState = null
+    for (var i = 0; i < waitAttempts; ++i) {
+        lastState = navigationControlState(sectionName, panelName, controlName)
+        if (lastState.ready) {
+            return
+        }
+        api.testflow.seeChanges(NAVIGATION_READY_POLL_MSEC)
+    }
+
+    lastState = navigationControlState(sectionName, panelName, controlName)
+    api.testflow.fatal("Navigation control " + sectionName + "/" + panelName + "/" + controlName
+                       + " was not ready within " + NAVIGATION_READY_TIMEOUT_MSEC + " msec: " + lastState.message)
+}
 
 var testCase = {
     name: "TC15: Region entry announces score view on focus",
@@ -19,10 +100,12 @@ var testCase = {
             api.testflow.seeChanges()
         }},
         {name: "Create score", func: function() {
+            waitForNavigationControl("NewScoreDialog", "BottomPanel", "Done")
             NewScore.done()
             api.testflow.seeChanges(2000)
         }},
         {name: "Wait for notation page to settle", func: function() {
+            waitForNavigationControl("NotationView", "ScoreView", "Score")
             api.testflow.seeChanges(1500)
         }},
         {name: "Verify 'Score view' was announced on score open", func: function() {
