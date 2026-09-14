@@ -37,6 +37,8 @@ target_sources(appshell PRIVATE
     internal/iappmenumodelhook.h
     internal/isessionsmanager.h
     internal/istartupscenario.h
+    internal/regionentryannouncer.cpp
+    internal/regionentryannouncer.h
     internal/sessionsmanager.cpp
     internal/sessionsmanager.h
     internal/startupscenario.cpp
