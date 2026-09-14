@@ -3,26 +3,51 @@ var Home = require("steps/Home.js")
 var NAVIGATION_READY_TIMEOUT_MSEC = 30000
 var NAVIGATION_READY_POLL_MSEC = 100
 
-function navigationControlAvailable(sectionName, panelName, controlName)
+function navigationControlState(sectionName, panelName, controlName)
 {
-    return api.navigation.goToControl(sectionName, panelName, controlName)
+    var activeSection = api.navigation.activeSection()
+    if (activeSection !== sectionName) {
+        return {
+            ready: false,
+            message: "active path is " + activeSection
+        }
+    }
+
+    var activePanel = api.navigation.activePanel()
+    if (activePanel !== panelName) {
+        return {
+            ready: false,
+            message: "active path is " + activeSection + "/" + activePanel
+        }
+    }
+
+    var activeControl = api.navigation.activeControl()
+    if (activeControl !== controlName) {
+        return {
+            ready: false,
+            message: "active path is " + activeSection + "/" + activePanel + "/" + activeControl
+        }
+    }
+
+    return {ready: true, message: ""}
 }
 
 function waitForNavigationControl(sectionName, panelName, controlName)
 {
     var waitAttempts = NAVIGATION_READY_TIMEOUT_MSEC / NAVIGATION_READY_POLL_MSEC
-    var controlAvailable = false
+    var lastState = null
     for (var i = 0; i < waitAttempts; ++i) {
-        controlAvailable = navigationControlAvailable(sectionName, panelName, controlName)
-        if (controlAvailable) {
+        lastState = navigationControlState(sectionName, panelName, controlName)
+        if (lastState.ready) {
             return
         }
         api.testflow.seeChanges(NAVIGATION_READY_POLL_MSEC)
     }
 
+    lastState = navigationControlState(sectionName, panelName, controlName)
     api.testflow.fatal("Navigation control " + sectionName + "/" + panelName + "/" + controlName
-                       + " was not available within " + NAVIGATION_READY_TIMEOUT_MSEC
-                       + " msec: api.navigation.goToControl returned false")
+                       + " was not active within " + NAVIGATION_READY_TIMEOUT_MSEC
+                       + " msec: " + lastState.message)
 }
 
 
@@ -44,7 +69,6 @@ var testCase = {
             api.testflow.seeChanges()
         }},
         {name: "Create score", func: function() {
-            waitForNavigationControl("NewScoreDialog", "BottomPanel", "Done")
             NewScore.done()
             api.testflow.seeChanges(2000)
         }},

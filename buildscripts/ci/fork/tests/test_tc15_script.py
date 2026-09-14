@@ -32,39 +32,42 @@ class TC15ScriptContractTests(unittest.TestCase):
         )
         self.assertEqual(step_names, EXPECTED_STEPS)
 
-    def test_wait_uses_stable_navigation_probe_and_explicit_budget(self):
+    def test_wait_uses_nonblocking_active_path_and_explicit_budget(self):
         self.assertIn("var NAVIGATION_READY_TIMEOUT_MSEC = 30000", self.source)
         self.assertIn("var NAVIGATION_READY_POLL_MSEC = 100", self.source)
-        self.assertIn(
-            "return api.navigation.goToControl(sectionName, panelName, controlName)",
-            self.source,
-        )
+        self.assertIn("var activeSection = api.navigation.activeSection()", self.source)
+        self.assertIn("var activePanel = api.navigation.activePanel()", self.source)
+        self.assertIn("var activeControl = api.navigation.activeControl()", self.source)
         self.assertIn(
             "api.testflow.seeChanges(NAVIGATION_READY_POLL_MSEC)",
             self.source,
         )
         self.assertIn(
-            "was not available within \" + NAVIGATION_READY_TIMEOUT_MSEC",
+            "was not active within \" + NAVIGATION_READY_TIMEOUT_MSEC",
             self.source,
         )
-        self.assertNotIn("api.navigation.panels(", self.source)
-        self.assertNotIn("api.navigation.controls(", self.source)
-        self.assertNotIn("api.testflow.sleep(", self.source)
-        self.assertIn(
-            'waitForNavigationControl("NewScoreDialog", "BottomPanel", "Done")',
-            self.source,
+        helper_start = self.source.index("function navigationControlState")
+        helper_end = self.source.index("var testCase", helper_start)
+        helper = self.source[helper_start:helper_end]
+        self.assertNotIn("api.navigation.panels(", helper)
+        self.assertNotIn("api.navigation.controls(", helper)
+        self.assertNotIn("api.navigation.goToControl(", helper)
+        self.assertNotIn("api.testflow.sleep(", helper)
+        self.assertEqual(
+            len(re.findall(r"function navigationControlState\(", self.source)),
+            1,
+        )
+        self.assertEqual(
+            len(re.findall(r"function waitForNavigationControl\(", self.source)),
+            1,
         )
         self.assertIn(
             'waitForNavigationControl("NotationView", "ScoreView", "Score")',
             self.source,
         )
 
-    def test_readiness_wait_precedes_score_creation_and_navigation_assertions(self):
+    def test_readiness_wait_follows_score_creation_and_precedes_assertions(self):
         create_score = self.source.index('{name: "Create score"')
-        wait_for_done = self.source.index(
-            'waitForNavigationControl("NewScoreDialog", "BottomPanel", "Done")',
-            create_score,
-        )
         create_done = self.source.index("NewScore.done()", create_score)
         settle_step = self.source.index('{name: "Wait for notation page to settle"')
         wait_for_score = self.source.index(
@@ -76,7 +79,10 @@ class TC15ScriptContractTests(unittest.TestCase):
             settle_step,
         )
 
-        self.assertLess(wait_for_done, create_done)
+        self.assertNotIn(
+            'waitForNavigationControl("NewScoreDialog", "BottomPanel", "Done")',
+            self.source,
+        )
         self.assertLess(create_done, wait_for_score)
         self.assertLess(wait_for_score, first_navigation_assertion)
 
