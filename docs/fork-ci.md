@@ -58,7 +58,7 @@ Compiler-cache identity includes the Visual Studio/VCTools/compiler banner, Wind
 
 Cache restore and save are never performed on pull-request events. The authoritative build does not restore or save `build.release`, `CMakeCache.txt`, or an extracted dependency tree. A cache hit must be reported through the matched-key/provenance evidence and real ccache statistics, not inferred from a launcher path.
 
-Exact whole-run warm qualification remains pending. The first green hosted run was cold; before describing caching or a release path as qualified, run the entire cache-enabled workflow on a fresh hosted runner and verify the same build/package/runtime/readiness evidence plus actual compiler hits. A local identity or launcher smoke is supporting evidence only, not that qualification.
+Exact whole-run warm qualification is complete for trusted run [34797044072](https://github.com/tbui17/MuseScore/actions/runs/34797044072), attempt 3. Attempt 2 was the cache-enabled cold primer: both restores missed, the full build/package/runtime/readiness path passed, and both caches were saved. Attempt 3 restored those exact keys and completed the same end-to-end path with 1,140 hits out of 2,521 cacheable calls (45.22%). Its pinned ccache 4.14 PCH probe passed with producer `1/0/0`, first consumer `2/0/0`, and second consumer `3/1/0` (cacheable/hits/uncacheable). Keep the matched-key/provenance and ccache-stat evidence with the run; this does not qualify the draft-release path.
 
 Baseline tools: standard `windows-2025`, Qt 6.10.2, `win64_msvc2022_64`, modules `qt5compat qtnetworkauth qtshadertools qtwebsockets`, 4 compile jobs and a 240-minute safety timeout. Actual runner image, compiler, SDK, CMake, Ninja, Python and Qt versions belong in build evidence. A runner label does not freeze MSVC. Change a toolchain pin only after reproducing a compatibility issue and requalify cold and warm artifacts.
 
@@ -92,29 +92,30 @@ A failed upload can leave a tag and incomplete draft. Inspect the tag, release I
 
 Preserve license notices and make exact application/framework/dependency sources discoverable. Before wider binary distribution, review corresponding-source requirements. A GitHub application source archive omits submodule contents; provenance alone does not establish compliance. Assemble recursive corresponding sources when required.
 
-## Qualification status and evidence (2026-09-13)
+## Qualification status and evidence (2026-09-14)
 
 Nothing in this section is a substitute for a hosted run. Recorded facts:
 
 | Item | Value |
 |---|---|
-| Application branch | `ci/fork-windows-releases`, based on application `main` `df4c4a03670a22fbfed49679440fa3c1f029c9be` |
-| Framework repair branch | `ci/pinned-dependency-bootstrap` in `tbui17/muse_framework`, draft PR https://github.com/tbui17/muse_framework/pull/1; pushed as `ac7772341de460f7c5b5e3af8ca0e546bc532e4f`, then `87f2e2a92060ca0bcf6b16adc38e84dfae67e5d6` (include-order resolution) `47579c22a6bee9b546b0deb0804fd47014a9c5db` (filesystem-safe GUI report names, refuse a step-less case, record a between-steps abort as aborted) and `b734227abcb2b78ec6bec87e5580c2c49e6ed8de` (synchronize the ring queue consumer test on producer completion) |
-| Framework repair base | `5fe181cdcddec2709ab9396335b3dc4be3d40258`, the gitlink the repair was based on; framework live `main` is `8c223d87b982edf135a8a21da61189201a7ec5a6` and does not contain that pin, so the repair is based on the pin rather than on live main. This bundle moves the application gitlink to the repair tip `b734227abcb2b78ec6bec87e5580c2c49e6ed8de` |
-| Dependency-loader tests | `cmake -P buildscripts/cmake/deps/tests/run-tests.cmake` in the framework: 15/15 pass, reproduced independently by a second agent on the same commit |
-| Application helper tests | `python3 -m unittest discover -s buildscripts/ci/fork/tests -p 'test_*.py'` and the PowerShell helper suites run locally before any hosted dispatch |
+| Application maintenance revision | `ci/fork-windows-releases`, application `8881bcdc0db1bffac426b302577b4f82157715f9`; its `muse` gitlink is framework maintenance `5519f3769b4e07a693c5b452a69cd19845d65f8d` |
+| Same-code PR cold run | [34797046747](https://github.com/tbui17/MuseScore/actions/runs/34797046747): `preflight`, `windows`, `units`, `runtime` and `Fork Windows readiness` succeeded with pull-request cache disabled; `release` was skipped |
+| Trusted cache-enabled cold primer | [34797044072](https://github.com/tbui17/MuseScore/actions/runs/34797044072), attempt 2: all mandatory jobs succeeded; both cache restores missed, both saves succeeded, and the package/runtime/readiness path passed |
+| Trusted cache-enabled warm proof | [34797044072](https://github.com/tbui17/MuseScore/actions/runs/34797044072), attempt 3: all mandatory jobs succeeded; ccache restore matched the attempt-2 key, dependency restore matched the attempt-2 key, both saves succeeded, and final ccache statistics were 2,521 cacheable calls, 1,140 hits (45.22%), 1,381 misses |
+| ccache/PCH proof | The attempt-3 diagnostic reports ccache `4.14`; producer `1/0/0`, first consumer `2/0/0`, second consumer `3/1/0` (cacheable/hits/uncacheable) |
+| Required notice proof | Framework `cmake -P buildscripts/cmake/deps/tests/run-license-tests.cmake` passed 2/2. The attempt-3 candidate manifest requires `licenses/qt-libraries/qtshadertools/src/3rdparty/SPIRV-Cross/LICENSE`; independent ZIP listing found that file and `COPYRIGHT.txt`. ZIP SHA-256 `e025a085d3df26632ff365a159022f41607940e633fbbc2dfce33bc38881dbdd` matched `SHA256SUMS.txt` and `build-manifest.json` |
 | Existing release | `braille-test-2026-08-17` metadata was read read-only (one asset, 177547861 bytes, published, not a prerelease); the release was not modified or deleted |
 
-Hosted runs are recorded run by run in `ci-baseline.md`. Run `34777803748` is the first green cold run (`preflight`, `windows`, `units`, `runtime` and `readiness`), with its artifact identity and per-case runtime evidence recorded there. Warm caching and the draft-release path remain unexercised, so this is cold-path qualification, not release qualification.
+The hosted Windows candidate path is qualified through the exact build/package/runtime/readiness gates on both the PR cold run and the trusted cache-enabled warm proof. The draft-release path remains unexercised and is not release-qualified.
 
 Open blockers for the hosted milestones:
 
-1. **Workflow-scope token (resolved for this branch).** The authenticated `gh` token reports scopes that do not include `workflow` (`repo`, `admin:*`, `user`, `gist`, ... are present), so HTTPS pushes that add or modify `.github/workflows/*` are rejected. The owner's existing SSH key pushed the branch instead (`git push git@github.com:tbui17/MuseScore.git ci/fork-windows-releases:ci/fork-windows-releases`, no force update). Future workflow-file pushes need the same path or a token re-authorised with `workflow` scope.
-2. **Cold hosted qualification** is recorded by run `34777803748` (all mandatory jobs green, artifact hash verified locally). Later gates remain unproven: the cache-enabled `use_cache=true` path has not had an exact whole-run warm qualification with real compiler hits, the opt-in draft-release path has not been exercised, and macOS/Linux release packaging is out of scope until Windows parity work continues.
-3. **Merge approval:** merging the framework PR or the application branch into `main` is an owner decision and is not performed by this pipeline. The draft-release path additionally requires the workflow to run from `main` with a source commit already merged into `main`.
+1. **Workflow-scope token (resolved for this branch).** The authenticated `gh` token reports scopes that do not include `workflow` (`repo`, `admin:*`, `user`, `gist`, ... are present), so HTTPS pushes that add or modify `.github/workflows/*` are rejected. The owner's existing SSH key pushed the maintenance branch instead, with no force update. Future workflow-file pushes need the same path or a token re-authorised with `workflow` scope.
+2. **Draft-release qualification.** The opt-in release path has not been exercised. It must run from `main` with a source commit already merged into `main`; only the isolated release job may create a draft prerelease, and publication remains a separate owner action. macOS/Linux release packaging is out of scope until Windows parity work continues.
+3. **Merge approval.** Merging the framework PR or the application branch into `main` is an owner decision and is not performed by this pipeline.
 
 ## Deferred work
 
 macOS/Linux release packaging, MSI identity and upgrade semantics, signing/notarization, PortableApps, upstream FTP/backend publishing, public release publication and accessibility device QA remain separate tasks. Legacy automatic Windows/GUI builds stay in place until replacement parity is demonstrated; then guard duplicate fork jobs while preserving upstream/manual behavior. Required-check settings must be updated only with owner authority and after the readiness status exists.
 
-See `ci-baseline.md` for observed failures and the implementation evidence record. Do not describe the pipeline as working until it contains actual successful hosted runs, tested package hashes and draft verification.
+See `ci-baseline.md` for observed failures and the implementation evidence record. Do not describe the draft-release path as qualified until its exact ZIP/manifest/checksum and GitHub draft-prerelease verification have completed.
