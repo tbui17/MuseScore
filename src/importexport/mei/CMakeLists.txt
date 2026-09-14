@@ -95,10 +95,12 @@ target_sources(iex_mei PRIVATE
 
 target_include_directories(iex_mei PRIVATE
     internal
-    ${MUSE_FRAMEWORK_SRC_PATH}/global/thirdparty/pugixml
 )
 
-target_link_libraries(iex_mei PRIVATE engraving)
+target_link_libraries(iex_mei PRIVATE
+    engraving
+    pugixml
+)
 
 if (MUE_BUILD_IMPORTEXPORT_TESTS)
     add_subdirectory(tests)
