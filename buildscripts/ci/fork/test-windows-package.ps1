@@ -88,6 +88,9 @@ $script:TestflowDataRelative = 'testflow-data'
 # pipe keeps the read open indefinitely, and a test must never wait on that.
 $script:KillTimeoutSeconds = 10
 $script:OutputDrainSeconds = 10
+$script:TimeoutDiagnosticsSeconds = 30
+$script:TimeoutDiagnosticsMaxBytes = 256MB
+$script:ProcessSnapshotTimeoutSeconds = 5
 
 # Profile sandbox layout used for the POSIX fixture host and for the plan testability hook; a real
 # Windows run uses the known folders instead of this sandbox (see the first-run profile section).
@@ -706,7 +709,8 @@ function Get-ProcessSnapshot {
     $processes = @()
     if ($script:IsWindowsHost) {
         try {
-            $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForEach-Object {
+            $processes = @(Get-CimInstance -ClassName Win32_Process `
+                    -OperationTimeoutSec $script:ProcessSnapshotTimeoutSeconds -ErrorAction Stop | ForEach-Object {
                     [ordered]@{
                         process_id        = [int] $_.ProcessId
                         parent_process_id = [int] $_.ParentProcessId
@@ -769,7 +773,9 @@ function Copy-TestflowTimeoutDiagnostics {
     <#
         Copies the evidence that is otherwise easy to lose when a testflow process is terminated.
         This is called immediately after a timed-out testflow process returns from its bounded kill
-        and output-drain path, before report validation or the next case starts.
+        and output-drain path, before report validation or the next case starts. Collection has its
+        own deadline and byte cap so a damaged profile or unexpectedly large log cannot hide the
+        original timeout result.
     #>
     param(
         [Parameter(Mandatory = $true)][string] $Name,
@@ -781,69 +787,153 @@ function Copy-TestflowTimeoutDiagnostics {
 
     $safeName = $Name -replace '[^A-Za-z0-9_.-]', '_'
     $diagnosticRoot = Join-Path $LogRoot (Join-Path 'diagnostics' $safeName)
-    New-Item -ItemType Directory -Path $diagnosticRoot -Force | Out-Null
+    $manifestPath = Join-Path $diagnosticRoot 'manifest.json'
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $deadline = [DateTime]::UtcNow.AddSeconds($script:TimeoutDiagnosticsSeconds)
     $copied = @()
     $missing = @()
     $errors = @()
+    $bytesCopied = [long] 0
+    $collectionTimedOut = $false
+
+    $resultRecord = @{
+        Root              = $diagnosticRoot
+        Manifest          = $manifestPath
+        Errors            = @()
+        CollectionTimedOut = $false
+        BytesCopied       = [long] 0
+        ElapsedSeconds    = 0.0
+    }
+    try {
+        New-Item -ItemType Directory -Path $diagnosticRoot -Force | Out-Null
+    } catch {
+        $resultRecord.Errors = @("diagnostic root: $($_.Exception.Message)")
+        $stopwatch.Stop()
+        $resultRecord.ElapsedSeconds = $stopwatch.Elapsed.TotalSeconds
+        return $resultRecord
+    }
 
     $items = @(
         @{ Label = 'stdout'; Source = $Result.StdoutLog; Kind = 'file' }
         @{ Label = 'stderr'; Source = $Result.StderrLog; Kind = 'file' }
+        # Only the app's own log directory and the seeded settings file are retained from the fresh
+        # profile. The rest of the profile is neither needed to diagnose a hang nor uploaded.
         @{ Label = 'profile-logs'; Source = $ProfilePlan.LogDirectory; Kind = 'directory' }
-        @{ Label = 'profile-local'; Source = $ProfilePlan.ProfileDirectory; Kind = 'directory' }
         @{ Label = 'profile-settings'; Source = $ProfilePlan.SettingsFilePath; Kind = 'file' }
         @{ Label = 'reports'; Source = (Join-Path $TestflowDataPath 'reports'); Kind = 'directory' }
         @{ Label = 'process'; Source = $Result.ProcessSnapshotRoot; Kind = 'directory' }
     )
 
     foreach ($item in $items) {
+        if ([DateTime]::UtcNow -ge $deadline) {
+            $collectionTimedOut = $true
+            $errors += "collection deadline reached before $($item.Label)"
+            break
+        }
+
+        $label = [string] $item.Label
         $source = [string] $item.Source
-        $destination = Join-Path $diagnosticRoot ([string] $item.Label)
+        $destination = Join-Path $diagnosticRoot $label
         $pathType = if ($item.Kind -eq 'file') { 'Leaf' } else { 'Container' }
-        if (-not [string]::IsNullOrWhiteSpace($source) -and (Test-Path -LiteralPath $source -PathType $pathType)) {
-            try {
-                if ($item.Kind -eq 'file') {
-                    Copy-Item -LiteralPath $source -Destination ($destination + [IO.Path]::GetExtension($source)) -Force
-                } else {
-                    Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
-                }
-                $copied += [string] $item.Label
-            } catch {
-                $errors += "$($item.Label): $($_.Exception.Message)"
-            }
-        } else {
-            $missing += [string] $item.Label
+        if ([string]::IsNullOrWhiteSpace($source) -or -not (Test-Path -LiteralPath $source -PathType $pathType)) {
+            $missing += $label
             try {
                 [IO.File]::WriteAllText(
-                    (Join-Path $diagnosticRoot "$($item.Label).missing.txt"),
+                    (Join-Path $diagnosticRoot "$label.missing.txt"),
                     "Source was not present at timeout: $source",
                     [Text.UTF8Encoding]::new($false))
             } catch {
-                $errors += "$($item.Label) missing marker: $($_.Exception.Message)"
+                $errors += "$label missing marker: $($_.Exception.Message)"
             }
+            continue
+        }
+
+        try {
+            if ($item.Kind -eq 'file') {
+                $sourceInfo = Get-Item -LiteralPath $source -ErrorAction Stop
+                $sourceLength = [long] $sourceInfo.Length
+                if ($sourceLength -gt ($script:TimeoutDiagnosticsMaxBytes - $bytesCopied)) {
+                    $errors += "$label exceeds the ${script:TimeoutDiagnosticsMaxBytes}-byte diagnostics cap"
+                    continue
+                }
+                Copy-Item -LiteralPath $source -Destination ($destination + [IO.Path]::GetExtension($source)) -Force
+                $bytesCopied += $sourceLength
+                $copied += $label
+            } else {
+                New-Item -ItemType Directory -Path $destination -Force | Out-Null
+                $directoryComplete = $true
+                $enumerator = [IO.Directory]::EnumerateFiles(
+                    $source, '*', [IO.SearchOption]::AllDirectories).GetEnumerator()
+                try {
+                    while ($enumerator.MoveNext()) {
+                        if ([DateTime]::UtcNow -ge $deadline) {
+                            $collectionTimedOut = $true
+                            $directoryComplete = $false
+                            $errors += "$label collection deadline reached"
+                            break
+                        }
+                        $filePath = [string] $enumerator.Current
+                        $fileInfo = Get-Item -LiteralPath $filePath -ErrorAction Stop
+                        if (($fileInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                            $directoryComplete = $false
+                            $errors += "$label skipped reparse-point file '$filePath'"
+                            continue
+                        }
+                        $fileLength = [long] $fileInfo.Length
+                        if ($fileLength -gt ($script:TimeoutDiagnosticsMaxBytes - $bytesCopied)) {
+                            $directoryComplete = $false
+                            $errors += "$label exceeded the ${script:TimeoutDiagnosticsMaxBytes}-byte diagnostics cap at '$filePath'"
+                            break
+                        }
+                        $relativePath = [IO.Path]::GetRelativePath($source, $filePath)
+                        $destinationPath = Join-Path $destination $relativePath
+                        New-Item -ItemType Directory -Path (Split-Path -Parent $destinationPath) -Force | Out-Null
+                        Copy-Item -LiteralPath $filePath -Destination $destinationPath -Force
+                        $bytesCopied += $fileLength
+                    }
+                } finally {
+                    $enumerator.Dispose()
+                }
+                if ($directoryComplete) {
+                    $copied += $label
+                }
+            }
+            if ([DateTime]::UtcNow -ge $deadline) {
+                $collectionTimedOut = $true
+                $errors += "$label collection exceeded its deadline"
+            }
+        } catch {
+            $errors += "$($label): $($_.Exception.Message)"
         }
     }
 
+    $stopwatch.Stop()
     $manifest = [ordered]@{
-        name              = $Name
-        timed_out         = $Result.TimedOut
-        diagnostic_root   = $diagnosticRoot
-        stdout_log        = $Result.StdoutLog
-        stderr_log        = $Result.StderrLog
-        testflow_data     = $TestflowDataPath
-        process_snapshots = $Result.ProcessSnapshotRoot
-        copied            = @($copied)
-        missing           = @($missing)
-        errors            = @($errors)
+        name                   = $Name
+        timed_out              = $Result.TimedOut
+        diagnostic_root        = $diagnosticRoot
+        stdout_log             = $Result.StdoutLog
+        stderr_log             = $Result.StderrLog
+        testflow_data          = $TestflowDataPath
+        process_snapshots      = $Result.ProcessSnapshotRoot
+        copied                 = @($copied)
+        missing                = @($missing)
+        errors                 = @($errors)
+        collection_timed_out   = $collectionTimedOut
+        collection_elapsed_sec = $stopwatch.Elapsed.TotalSeconds
+        bytes_copied           = $bytesCopied
     }
-    $manifestPath = Join-Path $diagnosticRoot 'manifest.json'
-    [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
+    try {
+        [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
+    } catch {
+        $errors += "manifest: $($_.Exception.Message)"
+    }
 
-    return @{
-        Root     = $diagnosticRoot
-        Manifest = $manifestPath
-        Errors   = @($errors)
-    }
+    $resultRecord.Errors = @($errors)
+    $resultRecord.CollectionTimedOut = $collectionTimedOut
+    $resultRecord.BytesCopied = $bytesCopied
+    $resultRecord.ElapsedSeconds = $stopwatch.Elapsed.TotalSeconds
+    return $resultRecord
 }
 
 
@@ -1430,11 +1520,20 @@ foreach ($scriptName in $script:RequiredTestScripts) {
         -TimeoutSeconds $GuiTimeoutSeconds -LogRoot $logRoot -ProcessSnapshotRoot $processSnapshotRoot
     $timeoutDiagnostics = $null
     if ($result.TimedOut) {
-        $timeoutDiagnostics = Copy-TestflowTimeoutDiagnostics -Name $processName `
-            -ProfilePlan $profilePlan -TestflowDataPath $script:TestflowDataRoot `
-            -Result $result -LogRoot $logRoot
+        $diagnosticRoot = Join-Path $logRoot (Join-Path 'diagnostics' ($processName -replace '[^A-Za-z0-9_.-]', '_'))
+        try {
+            $timeoutDiagnostics = Copy-TestflowTimeoutDiagnostics -Name $processName `
+                -ProfilePlan $profilePlan -TestflowDataPath $script:TestflowDataRoot `
+                -Result $result -LogRoot $logRoot
+        } catch {
+            $timeoutDiagnostics = @{
+                Root = $diagnosticRoot
+                Manifest = $null
+                Errors = @("collector: $($_.Exception.Message)")
+            }
+        }
         if ($timeoutDiagnostics.Errors.Count -gt 0) {
-            Add-Failure "$scriptName timeout diagnostics were incomplete: $($timeoutDiagnostics.Errors -join '; ')"
+            Add-Failure "$scriptName timeout diagnostics were incomplete: $($timeoutDiagnostics.Errors -join '; ') (original timeout preserved)"
         }
     }
 
@@ -1557,11 +1656,20 @@ function Invoke-TestflowProbe {
         -TimeoutSeconds $GuiTimeoutSeconds -LogRoot $logRoot -TestflowDataPath $DataRoot `
         -ProcessSnapshotRoot $processSnapshotRoot
     if ($result.TimedOut) {
-        $result.TimeoutDiagnostics = Copy-TestflowTimeoutDiagnostics -Name $processName `
-            -ProfilePlan $profilePlan -TestflowDataPath $DataRoot `
-            -Result $result -LogRoot $logRoot
+        $diagnosticRoot = Join-Path $logRoot (Join-Path 'diagnostics' ($processName -replace '[^A-Za-z0-9_.-]', '_'))
+        try {
+            $result.TimeoutDiagnostics = Copy-TestflowTimeoutDiagnostics -Name $processName `
+                -ProfilePlan $profilePlan -TestflowDataPath $DataRoot `
+                -Result $result -LogRoot $logRoot
+        } catch {
+            $result.TimeoutDiagnostics = @{
+                Root = $diagnosticRoot
+                Manifest = $null
+                Errors = @("collector: $($_.Exception.Message)")
+            }
+        }
         if ($result.TimeoutDiagnostics.Errors.Count -gt 0) {
-            Add-Failure "$processName timeout diagnostics were incomplete: $($result.TimeoutDiagnostics.Errors -join '; ')"
+            Add-Failure "$processName timeout diagnostics were incomplete: $($result.TimeoutDiagnostics.Errors -join '; ') (original timeout preserved)"
         }
     }
     return $result

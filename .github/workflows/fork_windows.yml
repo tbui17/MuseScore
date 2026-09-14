@@ -377,7 +377,8 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          # Diagnostics only: the extraction tree and the isolated profile are not uploaded.
+          # Diagnostics only: the extraction tree and the rest of the isolated profile are not uploaded;
+          # the helper may retain only fresh app logs and the seeded test settings under this directory.
           name: diagnostic-runtime-${{ github.run_id }}-${{ github.run_attempt }}
           path: runtime results/logs
           if-no-files-found: ignore

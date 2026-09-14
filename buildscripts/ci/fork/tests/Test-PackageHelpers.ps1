@@ -1175,6 +1175,10 @@ try {
             }
             $diagnosticManifest = Get-Content -LiteralPath (Join-Path $diagnosticRoot 'manifest.json') -Raw | ConvertFrom-Json
             Assert-True ($diagnosticManifest.timed_out -eq $true) 'timeout diagnostics must identify the timed-out process'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $diagnosticRoot 'profile-local'))) `
+                'diagnostics must not copy the whole profile tree'
+            Assert-True ($diagnosticManifest.collection_timed_out -eq $false) `
+                'bounded diagnostic collection must finish within its own deadline'
         }
 
         Invoke-Case 'runtime: stub application passes version/export/GUI checks' {
