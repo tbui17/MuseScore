@@ -1,53 +1,21 @@
 var NewScore = require("steps/NewScore.js")
 var Home = require("steps/Home.js")
-var NAVIGATION_READY_TIMEOUT_MSEC = 30000
-var NAVIGATION_READY_POLL_MSEC = 100
+var NOTATION_PAGE_URI = "musescore://notation"
+var NOTATION_READY_TIMEOUT_MSEC = 30000
+var NOTATION_READY_POLL_MSEC = 100
 
-function navigationControlState(sectionName, panelName, controlName)
+function waitForNotationPage()
 {
-    var activeSection = api.navigation.activeSection()
-    if (activeSection !== sectionName) {
-        return {
-            ready: false,
-            message: "active path is " + activeSection
-        }
-    }
-
-    var activePanel = api.navigation.activePanel()
-    if (activePanel !== panelName) {
-        return {
-            ready: false,
-            message: "active path is " + activeSection + "/" + activePanel
-        }
-    }
-
-    var activeControl = api.navigation.activeControl()
-    if (activeControl !== controlName) {
-        return {
-            ready: false,
-            message: "active path is " + activeSection + "/" + activePanel + "/" + activeControl
-        }
-    }
-
-    return {ready: true, message: ""}
-}
-
-function waitForNavigationControl(sectionName, panelName, controlName)
-{
-    var waitAttempts = NAVIGATION_READY_TIMEOUT_MSEC / NAVIGATION_READY_POLL_MSEC
-    var lastState = null
+    var waitAttempts = NOTATION_READY_TIMEOUT_MSEC / NOTATION_READY_POLL_MSEC
     for (var i = 0; i < waitAttempts; ++i) {
-        lastState = navigationControlState(sectionName, panelName, controlName)
-        if (lastState.ready) {
+        if (api.interactive.isOpened(NOTATION_PAGE_URI)) {
             return
         }
-        api.testflow.seeChanges(NAVIGATION_READY_POLL_MSEC)
+        api.testflow.seeChanges(NOTATION_READY_POLL_MSEC)
     }
 
-    lastState = navigationControlState(sectionName, panelName, controlName)
-    api.testflow.fatal("Navigation control " + sectionName + "/" + panelName + "/" + controlName
-                       + " was not active within " + NAVIGATION_READY_TIMEOUT_MSEC
-                       + " msec: " + lastState.message)
+    api.testflow.fatal("Notation page " + NOTATION_PAGE_URI
+                       + " was not open within " + NOTATION_READY_TIMEOUT_MSEC + " msec")
 }
 
 
@@ -73,7 +41,7 @@ var testCase = {
             api.testflow.seeChanges(2000)
         }},
         {name: "Wait for notation page to settle", func: function() {
-            waitForNavigationControl("NotationView", "ScoreView", "Score")
+            waitForNotationPage()
             api.testflow.seeChanges(1500)
         }},
         {name: "Verify 'Score view' was announced on score open", func: function() {
@@ -94,11 +62,14 @@ var testCase = {
             }
         }},
         {name: "Return to score canvas — should announce 'Score view'", func: function() {
+            // Capture the current announcement before the action that should emit a new one.
+            var announcementBeforeReturn = api.accessibility.announcement()
             api.navigation.goToControl("NotationView", "ScoreView", "Score")
             api.testflow.seeChanges(1000)
             var ann = api.accessibility.announcement()
             if (!ann || ann.indexOf("Score view") === -1) {
-                api.testflow.fatal("Expected 'Score view' announcement when returning to score canvas, got: '" + ann + "'")
+                api.testflow.fatal("Expected 'Score view' announcement when returning to score canvas, got: '"
+                                   + ann + "' (before return: '" + announcementBeforeReturn + "')")
             }
         }},
         {name: "F6 to next section — should NOT re-announce 'Score view'", func: function() {
