@@ -73,7 +73,7 @@ $BuildType = "RelWithDebInfo"
 $Channel = "dev"
 $Architecture = "x64"
 $Int32Max = [int]::MaxValue
-$PinnedCcacheVersion = "4.13.6"
+$PinnedCcacheVersion = "4.14"
 $CcacheSchema = "1"
 $CcacheMaxSize = "4G"
 $QtModules = "qt5compat qtnetworkauth qtshadertools qtwebsockets"
@@ -830,7 +830,6 @@ if ($UseCache) {
         CCACHE_DIR        = $CcacheDirectory
         CCACHE_MAXSIZE    = $CcacheMaxSize
         CCACHE_BASEDIR    = $SourceDirectory
-        CCACHE_CPP2       = "true"
         CCACHE_SLOPPINESS = "pch_defines,time_macros"
     }).GetEnumerator()) {
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value)
@@ -839,10 +838,9 @@ if ($UseCache) {
     Write-Host "CCACHE_DIR       = '$CcacheDirectory'"
     Write-Host "CCACHE_MAXSIZE   = '$CcacheMaxSize'"
     Write-Host "CCACHE_BASEDIR   = '$SourceDirectory'"
-    Write-Host "CCACHE_CPP2      = 'true'"
     Write-Host "CCACHE_SLOPPINESS= 'pch_defines,time_macros'"
 } else {
-    foreach ($name in @("CCACHE_DIR", "CCACHE_MAXSIZE", "CCACHE_BASEDIR", "CCACHE_CPP2", "CCACHE_SLOPPINESS")) {
+    foreach ($name in @("CCACHE_DIR", "CCACHE_MAXSIZE", "CCACHE_BASEDIR", "CCACHE_SLOPPINESS")) {
         [Environment]::SetEnvironmentVariable($name, $null)
     }
 }

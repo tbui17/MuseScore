@@ -33,8 +33,10 @@ target_sources(iex_capella PRIVATE
 
 add_subdirectory(thirdparty/rtf2html)
 
-include(SetupLicenseNotices)
-muse_install_license_notice(rtf2html "${CMAKE_CURRENT_LIST_DIR}/thirdparty/rtf2html" "COPYING.LESSER")
+if (MUSE_APP_INSTALL_RESOURCES_LOCATION)
+    include(SetupLicenseNotices)
+    muse_install_license_notice(rtf2html "${CMAKE_CURRENT_LIST_DIR}/thirdparty/rtf2html" "COPYING.LESSER")
+endif()
 
 target_link_libraries(iex_capella PRIVATE
     rtf2html

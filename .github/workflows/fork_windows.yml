@@ -148,9 +148,9 @@ jobs:
         if: needs.preflight.outputs.effective_use_cache == 'true'
         shell: pwsh
         env:
-          CCACHE_URL: https://github.com/ccache/ccache/releases/download/v4.13.6/ccache-4.13.6-windows-x86_64.zip
-          CCACHE_SHA256: 3d7cebb05850ad704e197b3f1d3f0f924ab6c9fdfc561578e146184fe9d89380
-          CCACHE_VERSION: 4.13.6
+          CCACHE_URL: https://github.com/ccache/ccache/releases/download/v4.14/ccache-4.14-windows-x86_64.zip
+          CCACHE_SHA256: 2568347a697e103ca1b073981c704ad76fb2507d066c38dba038dd73399d968f
+          CCACHE_VERSION: 4.14
         run: |
           $archive = Join-Path $env:RUNNER_TEMP "ccache-$env:CCACHE_VERSION-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.zip"
           Invoke-WebRequest -Uri $env:CCACHE_URL -OutFile $archive
@@ -175,6 +175,17 @@ jobs:
             throw "Pinned ccache reported an unexpected version (exit $reportedExitCode): $reported"
           }
           Write-Host "Pinned ccache $reportedVersion from verified $archive"
+      - name: Prove pinned ccache MSVC PCH support
+        if: needs.preflight.outputs.effective_use_cache == 'true'
+        shell: pwsh
+        working-directory: pipeline
+        run: |
+          & pwsh -NoProfile -NonInteractive -File buildscripts/ci/fork/tests/ccache-pch-probe.ps1 `
+            -CcacheDirectory ../build-output/ccache `
+            -LogDirectory ../build-output/logs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Pinned ccache MSVC PCH probe failed with exit code $LASTEXITCODE"
+          }
       - name: Resolve cache identity from native toolchain
         id: cache_identity
         if: needs.preflight.outputs.effective_use_cache == 'true'
