@@ -37,9 +37,9 @@ See [Code Structure on Wiki](https://github.com/musescore/MuseScore/wiki/CodeStr
 
 ### Tested Windows candidate
 
-The planned `fork-2026.09.14.1` release is an unsigned, extract-and-run development build. It is not an installer or a stable release. The pipeline creates the tag and draft prerelease once; this block never uses `latest` and refuses to reuse a download directory.
+The planned `fork-2026.09.14.1` release is an unsigned, extract-and-run development build. It is not an installer or a stable release. The pipeline creates the tag and draft prerelease once; the draft is created and available to authenticated maintainers. This block never uses `latest` and refuses to reuse a download directory.
 
-Run this after the draft release is published. It downloads exactly one ZIP, `build-manifest.json`, and `SHA256SUMS.txt` from that immutable tag, verifies the manifest and checksum before extraction, and then launches the extracted executable:
+Run this after the draft prerelease is created and available to authenticated maintainers. It downloads exactly one ZIP, `build-manifest.json`, and `SHA256SUMS.txt` from that immutable tag, verifies the manifest and checksum before extraction, and then launches the extracted executable:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
