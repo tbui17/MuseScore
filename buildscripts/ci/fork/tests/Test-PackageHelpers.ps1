@@ -1161,6 +1161,20 @@ try {
             Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a hanging application'
             Assert-True ($result.Output -match 'timed out') "unexpected error text: $($result.Output)"
             Assert-True ($stopwatch.Elapsed.TotalSeconds -lt 60) "timeout handling took too long: $($stopwatch.Elapsed.TotalSeconds)s"
+            $diagnosticRoot = Join-Path (Join-Path $WorkRoot 'rt-hang-out/logs/diagnostics') 'gui-TC11_CommandPaletteDialog'
+            foreach ($requiredDiagnostic in @(
+                    'stdout.log'
+                    'stderr.log'
+                    'profile-settings.ini'
+                    'reports.missing.txt'
+                    'process/process-before-termination.json'
+                    'process/process-after-termination.json'
+                    'manifest.json')) {
+                Assert-True (Test-Path -LiteralPath (Join-Path $diagnosticRoot $requiredDiagnostic) -PathType Leaf) `
+                    "timed-out GUI diagnostics must retain '$requiredDiagnostic' under $diagnosticRoot"
+            }
+            $diagnosticManifest = Get-Content -LiteralPath (Join-Path $diagnosticRoot 'manifest.json') -Raw | ConvertFrom-Json
+            Assert-True ($diagnosticManifest.timed_out -eq $true) 'timeout diagnostics must identify the timed-out process'
         }
 
         Invoke-Case 'runtime: stub application passes version/export/GUI checks' {

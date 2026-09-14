@@ -335,7 +335,9 @@ jobs:
   runtime:
     needs: [preflight, windows]
     runs-on: windows-2025
-    timeout-minutes: 30
+    # Three GUI cases and four probes each have the helper's 600s bound; leave collection time after
+    # that 70-minute worst case instead of letting the job cancel during TC15.
+    timeout-minutes: 90
     steps:
       # Trusted helper only: the runtime job never runs build code from the source checkout.
       - uses: actions/checkout@v6

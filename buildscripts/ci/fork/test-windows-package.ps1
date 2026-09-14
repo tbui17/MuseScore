@@ -694,6 +694,158 @@ function Stop-ProcessTree {
 
     return (Wait-ProcessExit -Process $Process -TimeoutSeconds $script:KillTimeoutSeconds)
 }
+function Get-ProcessSnapshot {
+    <#
+        Captures the processes visible while a timed-out child is being resolved. Windows runners use
+        Win32_Process so parent IDs and command lines identify the application tree; POSIX fixture
+        hosts use Get-Process because Win32_Process is unavailable there.
+    #>
+    param([Parameter(Mandatory = $true)][int] $RootProcessId)
+
+    $queryError = $null
+    $processes = @()
+    if ($script:IsWindowsHost) {
+        try {
+            $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForEach-Object {
+                    [ordered]@{
+                        process_id        = [int] $_.ProcessId
+                        parent_process_id = [int] $_.ParentProcessId
+                        name              = [string] $_.Name
+                        executable_path   = [string] $_.ExecutablePath
+                        command_line      = [string] $_.CommandLine
+                    }
+                })
+        } catch {
+            $queryError = $_.Exception.Message
+        }
+    } else {
+        try {
+            $processes = @(Get-Process -ErrorAction Stop | ForEach-Object {
+                    $path = ''
+                    try {
+                        $path = [string] $_.Path
+                    } catch {
+                        $path = ''
+                    }
+                    [ordered]@{
+                        process_id        = [int] $_.Id
+                        parent_process_id = $null
+                        name              = [string] $_.ProcessName
+                        executable_path   = $path
+                        command_line      = $null
+                    }
+                })
+        } catch {
+            $queryError = $_.Exception.Message
+        }
+    }
+
+    return [ordered]@{
+        captured_at_utc = [DateTime]::UtcNow.ToString('o')
+        root_process_id = $RootProcessId
+        query_error     = $queryError
+        processes       = $processes
+    }
+}
+
+function Save-ProcessSnapshot {
+    param(
+        [Parameter(Mandatory = $true)][int] $RootProcessId,
+        [Parameter(Mandatory = $true)][string] $Path
+    )
+
+    try {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $Path) -Force | Out-Null
+        $snapshot = Get-ProcessSnapshot -RootProcessId $RootProcessId
+        [IO.File]::WriteAllText($Path, ($snapshot | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
+        return $true
+    } catch {
+        Write-Host "   process snapshot failed: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Copy-TestflowTimeoutDiagnostics {
+    <#
+        Copies the evidence that is otherwise easy to lose when a testflow process is terminated.
+        This is called immediately after a timed-out testflow process returns from its bounded kill
+        and output-drain path, before report validation or the next case starts.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string] $Name,
+        [Parameter(Mandatory = $true)][hashtable] $ProfilePlan,
+        [Parameter(Mandatory = $true)][string] $TestflowDataPath,
+        [Parameter(Mandatory = $true)][hashtable] $Result,
+        [Parameter(Mandatory = $true)][string] $LogRoot
+    )
+
+    $safeName = $Name -replace '[^A-Za-z0-9_.-]', '_'
+    $diagnosticRoot = Join-Path $LogRoot (Join-Path 'diagnostics' $safeName)
+    New-Item -ItemType Directory -Path $diagnosticRoot -Force | Out-Null
+    $copied = @()
+    $missing = @()
+    $errors = @()
+
+    $items = @(
+        @{ Label = 'stdout'; Source = $Result.StdoutLog; Kind = 'file' }
+        @{ Label = 'stderr'; Source = $Result.StderrLog; Kind = 'file' }
+        @{ Label = 'profile-logs'; Source = $ProfilePlan.LogDirectory; Kind = 'directory' }
+        @{ Label = 'profile-local'; Source = $ProfilePlan.ProfileDirectory; Kind = 'directory' }
+        @{ Label = 'profile-settings'; Source = $ProfilePlan.SettingsFilePath; Kind = 'file' }
+        @{ Label = 'reports'; Source = (Join-Path $TestflowDataPath 'reports'); Kind = 'directory' }
+        @{ Label = 'process'; Source = $Result.ProcessSnapshotRoot; Kind = 'directory' }
+    )
+
+    foreach ($item in $items) {
+        $source = [string] $item.Source
+        $destination = Join-Path $diagnosticRoot ([string] $item.Label)
+        $pathType = if ($item.Kind -eq 'file') { 'Leaf' } else { 'Container' }
+        if (-not [string]::IsNullOrWhiteSpace($source) -and (Test-Path -LiteralPath $source -PathType $pathType)) {
+            try {
+                if ($item.Kind -eq 'file') {
+                    Copy-Item -LiteralPath $source -Destination ($destination + [IO.Path]::GetExtension($source)) -Force
+                } else {
+                    Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+                }
+                $copied += [string] $item.Label
+            } catch {
+                $errors += "$($item.Label): $($_.Exception.Message)"
+            }
+        } else {
+            $missing += [string] $item.Label
+            try {
+                [IO.File]::WriteAllText(
+                    (Join-Path $diagnosticRoot "$($item.Label).missing.txt"),
+                    "Source was not present at timeout: $source",
+                    [Text.UTF8Encoding]::new($false))
+            } catch {
+                $errors += "$($item.Label) missing marker: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    $manifest = [ordered]@{
+        name              = $Name
+        timed_out         = $Result.TimedOut
+        diagnostic_root   = $diagnosticRoot
+        stdout_log        = $Result.StdoutLog
+        stderr_log        = $Result.StderrLog
+        testflow_data     = $TestflowDataPath
+        process_snapshots = $Result.ProcessSnapshotRoot
+        copied            = @($copied)
+        missing           = @($missing)
+        errors            = @($errors)
+    }
+    $manifestPath = Join-Path $diagnosticRoot 'manifest.json'
+    [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
+
+    return @{
+        Root     = $diagnosticRoot
+        Manifest = $manifestPath
+        Errors   = @($errors)
+    }
+}
+
 
 function Read-RedirectedOutput {
     <#
@@ -727,7 +879,8 @@ function Invoke-BoundedProcess {
         [Parameter(Mandatory = $true)][hashtable] $ProfilePlan,
         [Parameter(Mandatory = $true)][int] $TimeoutSeconds,
         [Parameter(Mandatory = $true)][string] $LogRoot,
-        [string] $TestflowDataPath
+        [string] $TestflowDataPath,
+        [string] $ProcessSnapshotRoot = ''
     )
 
     $startInfoResult = New-ChildProcessStartInfo -Executable $Executable -WorkingDirectory $WorkingDirectory `
@@ -742,6 +895,10 @@ function Invoke-BoundedProcess {
     Write-Host "> $Executable $($Arguments -join ' ')"
     Write-Host "   timeout ${TimeoutSeconds}s, log $stdoutPath"
 
+    if (-not [string]::IsNullOrWhiteSpace($ProcessSnapshotRoot)) {
+        New-Item -ItemType Directory -Path $ProcessSnapshotRoot -Force | Out-Null
+    }
+
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     $null = $process.Start()
@@ -752,10 +909,18 @@ function Invoke-BoundedProcess {
     $terminationConfirmed = $true
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         $timedOut = $true
+        if (-not [string]::IsNullOrWhiteSpace($ProcessSnapshotRoot)) {
+            Save-ProcessSnapshot -RootProcessId $process.Id `
+                -Path (Join-Path $ProcessSnapshotRoot 'process-before-termination.json') | Out-Null
+        }
         Write-Host "   TIMEOUT after ${TimeoutSeconds}s; terminating the process tree"
         $terminationConfirmed = Stop-ProcessTree -Process $process
         if (-not $terminationConfirmed) {
             Add-Failure "$Name did not exit within ${TimeoutSeconds}s and its process tree could not be terminated within $($script:KillTimeoutSeconds)s; the run cannot be bounded (log $stdoutPath)"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ProcessSnapshotRoot)) {
+            Save-ProcessSnapshot -RootProcessId $process.Id `
+                -Path (Join-Path $ProcessSnapshotRoot 'process-after-termination.json') | Out-Null
         }
     }
 
@@ -793,6 +958,7 @@ function Invoke-BoundedProcess {
         Stderr               = $stderr
         StdoutLog            = $stdoutPath
         StderrLog            = $stderrPath
+        ProcessSnapshotRoot  = $ProcessSnapshotRoot
         RemovedPathEntries   = $startInfoResult.RemovedPathEntries
         RemovedVariables     = $startInfoResult.RemovedVariables
     }
@@ -1256,10 +1422,21 @@ foreach ($scriptName in $script:RequiredTestScripts) {
         Remove-Item -LiteralPath $reportsRoot -Recurse -Force
     }
 
-    $result = Invoke-BoundedProcess -Name ("gui-" + ($scriptName -replace '\.js$', '')) -Executable $executableFullPath `
+    $processName = "gui-" + ($scriptName -replace '\.js$', '')
+    $processSnapshotRoot = Join-Path $logRoot (Join-Path 'process-snapshots' $processName)
+    $result = Invoke-BoundedProcess -Name $processName -Executable $executableFullPath `
         -Arguments @('--test-case-gui', $extractedScript) `
         -WorkingDirectory $extractRoot -ProfilePlan $profilePlan `
-        -TimeoutSeconds $GuiTimeoutSeconds -LogRoot $logRoot
+        -TimeoutSeconds $GuiTimeoutSeconds -LogRoot $logRoot -ProcessSnapshotRoot $processSnapshotRoot
+    $timeoutDiagnostics = $null
+    if ($result.TimedOut) {
+        $timeoutDiagnostics = Copy-TestflowTimeoutDiagnostics -Name $processName `
+            -ProfilePlan $profilePlan -TestflowDataPath $script:TestflowDataRoot `
+            -Result $result -LogRoot $logRoot
+        if ($timeoutDiagnostics.Errors.Count -gt 0) {
+            Add-Failure "$scriptName timeout diagnostics were incomplete: $($timeoutDiagnostics.Errors -join '; ')"
+        }
+    }
 
     $recordedReports = @()
     if (Test-Path -LiteralPath $reportsRoot -PathType Container) {
@@ -1268,7 +1445,7 @@ foreach ($scriptName in $script:RequiredTestScripts) {
 
     $ok = $true
     if ($result.TimedOut) {
-        Add-Failure "$scriptName timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
+        Add-Failure "$scriptName timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (diagnostics $($timeoutDiagnostics.Root); log $($result.StdoutLog))"
         $ok = $false
     } elseif ($result.ExitCode -ne 0) {
         Add-Failure "$scriptName failed with exit code $($result.ExitCode) (log $($result.StdoutLog))"
@@ -1294,7 +1471,7 @@ foreach ($scriptName in $script:RequiredTestScripts) {
     foreach ($recordedReport in $recordedReports) {
         Copy-Item -LiteralPath $recordedReport.FullName -Destination (Join-Path $logRoot ("testflow-" + $recordedReport.Name)) -Force -ErrorAction SilentlyContinue
     }
-    Add-Result -Result @{ name = $scriptName; command = '--test-case-gui'; argv = @('--test-case-gui', $extractedScript); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $ok; recorded_reports = @($recordedReports | ForEach-Object { $_.Name }); log = $result.StdoutLog }
+    Add-Result -Result @{ name = $scriptName; command = '--test-case-gui'; argv = @('--test-case-gui', $extractedScript); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $ok; recorded_reports = @($recordedReports | ForEach-Object { $_.Name }); diagnostics = if ($null -eq $timeoutDiagnostics) { $null } else { $timeoutDiagnostics.Root }; log = $result.StdoutLog }
 }
 
 # ---------------------------------------------------------------------------
@@ -1372,10 +1549,22 @@ function Invoke-TestflowProbe {
         [Parameter(Mandatory = $true)][string] $DataRoot
     )
 
-    return Invoke-BoundedProcess -Name ("probe-" + $Name) -Executable $executableFullPath `
+    $processName = "probe-" + $Name
+    $processSnapshotRoot = Join-Path $logRoot (Join-Path 'process-snapshots' $processName)
+    $result = Invoke-BoundedProcess -Name $processName -Executable $executableFullPath `
         -Arguments @('--test-case-gui', $ScriptPath) `
         -WorkingDirectory $extractRoot -ProfilePlan $profilePlan `
-        -TimeoutSeconds $GuiTimeoutSeconds -LogRoot $logRoot -TestflowDataPath $DataRoot
+        -TimeoutSeconds $GuiTimeoutSeconds -LogRoot $logRoot -TestflowDataPath $DataRoot `
+        -ProcessSnapshotRoot $processSnapshotRoot
+    if ($result.TimedOut) {
+        $result.TimeoutDiagnostics = Copy-TestflowTimeoutDiagnostics -Name $processName `
+            -ProfilePlan $profilePlan -TestflowDataPath $DataRoot `
+            -Result $result -LogRoot $logRoot
+        if ($result.TimeoutDiagnostics.Errors.Count -gt 0) {
+            Add-Failure "$processName timeout diagnostics were incomplete: $($result.TimeoutDiagnostics.Errors -join '; ')"
+        }
+    }
+    return $result
 }
 
 # Probe 1: the case name contains ':', which is not valid in a Windows file name. The run must
@@ -1386,7 +1575,7 @@ $result = Invoke-TestflowProbe -Name 'finished' -ScriptPath $probeScripts['finis
 $probeReports = @(Get-ChildItem -LiteralPath (Join-Path $finishedDataRoot 'reports') -File -ErrorAction SilentlyContinue)
 $probeOk = $false
 if ($result.TimedOut) {
-    Add-Failure "probe finished timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
+    Add-Failure "probe finished timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (diagnostics $($result.TimeoutDiagnostics.Root); log $($result.StdoutLog))"
 } elseif ($result.ExitCode -ne 0) {
     Add-Failure "probe finished: a case that finishes every step must exit 0, got $($result.ExitCode) (log $($result.StdoutLog))"
 } elseif ($probeReports.Count -ne 1) {
@@ -1403,7 +1592,7 @@ if ($result.TimedOut) {
         Write-Host "probe finished passed (exit 0, report '$($probeReports[0].Name)' records the finished step)"
     }
 }
-Add-Result -Result @{ name = 'probe-finished'; command = '--test-case-gui'; argv = @('--test-case-gui', $probeScripts['finished']); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $probeOk; log = $result.StdoutLog }
+Add-Result -Result @{ name = 'probe-finished'; command = '--test-case-gui'; argv = @('--test-case-gui', $probeScripts['finished']); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $probeOk; diagnostics = if ($result.ContainsKey('TimeoutDiagnostics')) { $result.TimeoutDiagnostics.Root } else { $null }; log = $result.StdoutLog }
 
 # Probe 2: the configured testflow data path is an existing file, so the report cannot be
 # created. The run must fail instead of reporting success without evidence.
@@ -1412,28 +1601,28 @@ $blockedDataPath = Join-Path $probeRoot 'data-blocked'
 $result = Invoke-TestflowProbe -Name 'report-failure' -ScriptPath $probeScripts['finished'] -DataRoot $blockedDataPath
 $probeOk = $false
 if ($result.TimedOut) {
-    Add-Failure "probe report-failure timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
+    Add-Failure "probe report-failure timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (diagnostics $($result.TimeoutDiagnostics.Root); log $($result.StdoutLog))"
 } elseif ($result.ExitCode -ne 1) {
     Add-Failure "probe report-failure: expected exit 1 for a run whose report cannot be created, got exit $($result.ExitCode); a crash or unexpected exit is not a correct rejection (log $($result.StdoutLog))"
 } else {
     $probeOk = $true
     Write-Host "probe report-failure passed (exit $($result.ExitCode) with MUSE_TESTFLOW_DATA_PATH pointing at a file)"
 }
-Add-Result -Result @{ name = 'probe-report-failure'; command = '--test-case-gui'; argv = @('--test-case-gui', $probeScripts['finished']); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $probeOk; log = $result.StdoutLog }
+Add-Result -Result @{ name = 'probe-report-failure'; command = '--test-case-gui'; argv = @('--test-case-gui', $probeScripts['finished']); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $probeOk; diagnostics = if ($result.ContainsKey('TimeoutDiagnostics')) { $result.TimeoutDiagnostics.Root } else { $null }; log = $result.StdoutLog }
 
 # Probe 3: a test case without steps must not be reported as a pass.
 $emptyDataRoot = Join-Path $probeRoot 'data-empty'
 $result = Invoke-TestflowProbe -Name 'empty' -ScriptPath $probeScripts['empty'] -DataRoot $emptyDataRoot
 $probeOk = $false
 if ($result.TimedOut) {
-    Add-Failure "probe empty timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
+    Add-Failure "probe empty timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (diagnostics $($result.TimeoutDiagnostics.Root); log $($result.StdoutLog))"
 } elseif ($result.ExitCode -ne 1) {
     Add-Failure "probe empty: expected exit 1 for a test case without steps, got exit $($result.ExitCode); a crash or unexpected exit is not a correct rejection (log $($result.StdoutLog))"
 } else {
     $probeOk = $true
     Write-Host "probe empty passed (exit $($result.ExitCode) for a case without steps)"
 }
-Add-Result -Result @{ name = 'probe-empty'; command = '--test-case-gui'; argv = @('--test-case-gui', $probeScripts['empty']); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $probeOk; log = $result.StdoutLog }
+Add-Result -Result @{ name = 'probe-empty'; command = '--test-case-gui'; argv = @('--test-case-gui', $probeScripts['empty']); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $probeOk; diagnostics = if ($result.ContainsKey('TimeoutDiagnostics')) { $result.TimeoutDiagnostics.Root } else { $null }; log = $result.StdoutLog }
 
 # Probe 4: an aborted test case must exit 1 and record the abort in its report.
 $abortedDataRoot = Join-Path $probeRoot 'data-aborted'
@@ -1441,7 +1630,7 @@ $result = Invoke-TestflowProbe -Name 'aborted' -ScriptPath $probeScripts['aborte
 $probeReports = @(Get-ChildItem -LiteralPath (Join-Path $abortedDataRoot 'reports') -File -ErrorAction SilentlyContinue)
 $probeOk = $false
 if ($result.TimedOut) {
-    Add-Failure "probe aborted timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (log $($result.StdoutLog))"
+    Add-Failure "probe aborted timed out after ${GuiTimeoutSeconds}s; $($result.TerminationSummary) (diagnostics $($result.TimeoutDiagnostics.Root); log $($result.StdoutLog))"
 } elseif ($result.ExitCode -ne 1) {
     Add-Failure "probe aborted: expected exit 1 for an aborted test case, got exit $($result.ExitCode); a crash or unexpected exit is not a correct rejection (log $($result.StdoutLog))"
 } elseif ($probeReports.Count -ne 1) {
@@ -1455,7 +1644,7 @@ if ($result.TimedOut) {
         Write-Host "probe aborted passed (exit $($result.ExitCode), report '$($probeReports[0].Name)' records the abort)"
     }
 }
-Add-Result -Result @{ name = 'probe-aborted'; command = '--test-case-gui'; argv = @('--test-case-gui', $probeScripts['aborted']); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $probeOk; log = $result.StdoutLog }
+Add-Result -Result @{ name = 'probe-aborted'; command = '--test-case-gui'; argv = @('--test-case-gui', $probeScripts['aborted']); exit_code = $result.ExitCode; timed_out = $result.TimedOut; ok = $probeOk; diagnostics = if ($result.ContainsKey('TimeoutDiagnostics')) { $result.TimeoutDiagnostics.Root } else { $null }; log = $result.StdoutLog }
 
 # ---------------------------------------------------------------------------
 # Diagnostics
