@@ -25,22 +25,6 @@ function waitForNavigationControl(sectionName, panelName, controlName)
                        + " msec: api.navigation.goToControl returned false")
 }
 
-function waitForNavigationControl(sectionName, panelName, controlName)
-{
-    var waitAttempts = NAVIGATION_READY_TIMEOUT_MSEC / NAVIGATION_READY_POLL_MSEC
-    var lastState = null
-    for (var i = 0; i < waitAttempts; ++i) {
-        lastState = navigationControlState(sectionName, panelName, controlName)
-        if (lastState.ready) {
-            return
-        }
-        api.testflow.seeChanges(NAVIGATION_READY_POLL_MSEC)
-    }
-
-    lastState = navigationControlState(sectionName, panelName, controlName)
-    api.testflow.fatal("Navigation control " + sectionName + "/" + panelName + "/" + controlName
-                       + " was not ready within " + NAVIGATION_READY_TIMEOUT_MSEC + " msec: " + lastState.message)
-}
 
 var testCase = {
     name: "TC15: Region entry announces score view on focus",
