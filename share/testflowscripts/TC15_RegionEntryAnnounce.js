@@ -3,6 +3,7 @@ var Home = require("steps/Home.js")
 var NOTATION_PAGE_URI = "musescore://notation"
 var NOTATION_READY_TIMEOUT_MSEC = 30000
 var NOTATION_READY_POLL_MSEC = 100
+var NOTATION_SETTLE_MSEC = 1500
 var NEW_SCORE_SECTION = "NewScoreDialog"
 var NEW_SCORE_SELECT_PATH = "NewScoreDialog/SelectPanel/Select"
 var NEW_SCORE_SCORE_LIST_PANEL = "ListView"
@@ -173,6 +174,8 @@ var testCase = {
         }},
         {name: "Wait for notation page to settle", func: function() {
             waitForNotationPage()
+            // Keep the route gate separate from this bounded event-loop yield.
+            api.testflow.seeChanges(NOTATION_SETTLE_MSEC)
         }},
         {name: "Verify 'Score view' was announced on score open", func: function() {
             var ann = api.accessibility.announcement()

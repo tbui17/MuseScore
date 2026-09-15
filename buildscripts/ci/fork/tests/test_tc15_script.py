@@ -36,6 +36,7 @@ class TC15ScriptContractTests(unittest.TestCase):
         self.assertIn('var NOTATION_PAGE_URI = "musescore://notation"', self.source)
         self.assertIn("var NOTATION_READY_TIMEOUT_MSEC = 30000", self.source)
         self.assertIn("var NOTATION_READY_POLL_MSEC = 100", self.source)
+        self.assertIn("var NOTATION_SETTLE_MSEC = 1500", self.source)
         self.assertIn(
             "api.interactive.isOpened(NOTATION_PAGE_URI)",
             self.source,
@@ -67,7 +68,10 @@ class TC15ScriptContractTests(unittest.TestCase):
             self.source.index('{name: "Verify \'Score view\' was announced on score open"')
         ]
         self.assertNotRegex(readiness_step, r"api\.navigation\.")
-
+        self.assertIn(
+            "api.testflow.seeChanges(NOTATION_SETTLE_MSEC)",
+            readiness_step,
+        )
     def test_readiness_wait_follows_bounded_observed_keyboard_submission(self):
         create_score = self.source.index('{name: "Create score"')
         settle_step = self.source.index('{name: "Wait for notation page to settle"')
@@ -76,6 +80,10 @@ class TC15ScriptContractTests(unittest.TestCase):
         submitter = self.source[submitter_start:create_score]
         wait_for_page = self.source.index(
             "waitForNotationPage()",
+            settle_step,
+        )
+        settle_yield = self.source.index(
+            "api.testflow.seeChanges(NOTATION_SETTLE_MSEC)",
             settle_step,
         )
         first_navigation_assertion = self.source.index(
@@ -112,8 +120,8 @@ class TC15ScriptContractTests(unittest.TestCase):
         self.assertNotIn("api.testflow.seeChanges", create_step)
         self.assertIn("submitNewScoreDialog()", create_step)
         self.assertLess(create_score, wait_for_page)
-        self.assertLess(wait_for_page, first_navigation_assertion)
-        self.assertNotIn("api.testflow.seeChanges", self.source[settle_step:first_navigation_assertion])
+        self.assertLess(wait_for_page, settle_yield)
+        self.assertLess(settle_yield, first_navigation_assertion)
 
         return_step = self.source.index(
             '{name: "Return to score canvas — should announce \'Score view\'"',
