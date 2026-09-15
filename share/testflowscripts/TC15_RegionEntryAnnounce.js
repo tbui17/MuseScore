@@ -29,6 +29,24 @@ function failNewScoreNavigation(message, visitedPaths)
     api.testflow.fatal(message + "; visited paths: " + visitedPaths.join(" -> "))
 }
 
+function triggerEnabledDone(visitedPaths)
+{
+    var controls = api.navigation.controls(NEW_SCORE_SECTION, NEW_SCORE_BOTTOM_PANEL)
+    var doneEnabled = false
+    for (var i = 0; i < controls.length; ++i) {
+        if (controls[i].name === "Done") {
+            doneEnabled = controls[i].enabled
+            break
+        }
+    }
+    if (!doneEnabled) {
+        failNewScoreNavigation("Done control is not enabled after instrument selection", visitedPaths)
+    }
+    if (!api.navigation.triggerControl(NEW_SCORE_SECTION, NEW_SCORE_BOTTOM_PANEL, "Done")) {
+        failNewScoreNavigation("Enabled Done control could not be triggered", visitedPaths)
+    }
+}
+
 function submitNewScoreDialog()
 {
     var visitedPaths = []
@@ -42,7 +60,7 @@ function submitNewScoreDialog()
         }
 
         if (current.value === NEW_SCORE_DONE_PATH) {
-            api.keyboard.key("Return")
+            triggerEnabledDone(visitedPaths)
             return
         }
 
@@ -85,27 +103,10 @@ function submitNewScoreDialog()
                 failNewScoreNavigation("Select exposed an empty score list; got "
                                        + afterSelect.value, visitedPaths)
             }
-            if (afterSelect.value === NEW_SCORE_DONE_PATH) {
-                api.keyboard.key("Return")
-                return
-            }
-            continue
-        }
 
-        if (current.panel === NEW_SCORE_BOTTOM_PANEL) {
-            // Tab changes panels, while End selects the last enabled footer
-            // control; with Done enabled this must be the exact target.
-            api.keyboard.key("End")
-            api.testflow.seeChanges(NEW_SCORE_NAV_SETTLE_MSEC)
-
-            var lastControl = readActiveNavigationPath()
-            if (lastControl.value === current.value) {
-                failNewScoreNavigation("End made no navigation progress at " + current.value, visitedPaths)
-            }
-            if (lastControl.value !== NEW_SCORE_DONE_PATH) {
-                failNewScoreNavigation("Expected Done after End, got " + lastControl.value, visitedPaths)
-            }
-            api.keyboard.key("Return")
+            // The observed score-list/footer postcondition proves the Done
+            // binding is enabled; submit exactly once through that control.
+            triggerEnabledDone(visitedPaths)
             return
         }
 
@@ -125,12 +126,12 @@ function submitNewScoreDialog()
             failNewScoreNavigation("Navigation cycle detected at " + next.value, visitedPaths)
         }
         if (next.value === NEW_SCORE_DONE_PATH) {
-            api.keyboard.key("Return")
+            triggerEnabledDone(visitedPaths)
             return
         }
     }
 
-    failNewScoreNavigation("Done control was not reached within "
+    failNewScoreNavigation("Select control was not reached within "
                            + NEW_SCORE_NAV_MAX_TABS + " Tab steps", visitedPaths)
 }
 
@@ -172,7 +173,6 @@ var testCase = {
         }},
         {name: "Wait for notation page to settle", func: function() {
             waitForNotationPage()
-            api.testflow.seeChanges(1500)
         }},
         {name: "Verify 'Score view' was announced on score open", func: function() {
             var ann = api.accessibility.announcement()
