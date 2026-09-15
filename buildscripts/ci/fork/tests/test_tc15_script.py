@@ -68,15 +68,15 @@ class TC15ScriptContractTests(unittest.TestCase):
         ]
         self.assertNotRegex(readiness_step, r"api\.navigation\.")
 
-    def test_readiness_wait_follows_pre_submit_control_selection_and_precedes_assertions(self):
+    def test_readiness_wait_follows_direct_score_submission_and_precedes_assertions(self):
         create_score = self.source.index('{name: "Create score"')
-        done_selection = self.source.index(
-            'api.navigation.goToControl("NewScoreDialog", "BottomPanel", "Done")',
+        settle_step = self.source.index('{name: "Wait for notation page to settle"')
+        create_step = self.source[create_score:settle_step]
+        create_submit = self.source.index(
+            'api.navigation.triggerControl("NewScoreDialog", "BottomPanel", "Done")',
             create_score,
         )
-        done_guard = self.source.index("if (!doneReady)", create_score)
-        create_submit = self.source.index('api.keyboard.key("Return")', create_score)
-        settle_step = self.source.index('{name: "Wait for notation page to settle"')
+        submit_guard = self.source.index("if (!submitted)", create_score)
         wait_for_page = self.source.index(
             "waitForNotationPage()",
             settle_step,
@@ -87,9 +87,11 @@ class TC15ScriptContractTests(unittest.TestCase):
         )
 
         self.assertNotIn("NewScore.done()", self.source)
-        self.assertLess(done_selection, done_guard)
-        self.assertLess(done_guard, create_submit)
-        self.assertLess(create_submit, wait_for_page)
+        self.assertNotIn("api.navigation.goToControl", create_step)
+        self.assertNotIn("api.keyboard.key", create_step)
+        self.assertNotIn("api.testflow.seeChanges", create_step)
+        self.assertLess(create_submit, submit_guard)
+        self.assertLess(submit_guard, wait_for_page)
         self.assertLess(wait_for_page, first_navigation_assertion)
 
         return_step = self.source.index(

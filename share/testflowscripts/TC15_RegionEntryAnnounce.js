@@ -37,14 +37,12 @@ var testCase = {
             api.testflow.seeChanges()
         }},
         {name: "Create score", func: function() {
-            // The dialog navigation tree is stable before submission. Select Done
-            // synchronously, then use the direct keyboard action to submit it.
-            var doneReady = api.navigation.goToControl("NewScoreDialog", "BottomPanel", "Done")
-            if (!doneReady) {
+            // Submit through the established New Score trigger path. Keep score
+            // readiness separate so this action has no post-submit stabilization.
+            var submitted = api.navigation.triggerControl("NewScoreDialog", "BottomPanel", "Done")
+            if (!submitted) {
                 api.testflow.fatal("New Score Done control was not available before submission")
             }
-            api.keyboard.key("Return")
-            api.testflow.seeChanges(2000)
         }},
         {name: "Wait for notation page to settle", func: function() {
             waitForNotationPage()
