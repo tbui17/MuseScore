@@ -11,7 +11,7 @@ EXPECTED_STEPS = [
     "Open New Score Dialog",
     "Select Instruments",
     "Create score",
-    "Wait for notation page to settle",
+    "Bounded UI stabilization after score creation",
     "Verify 'Score view' was announced on score open",
     "Tab to status bar — should NOT re-announce 'Score view'",
     "Return to score canvas — should announce 'Score view'",
@@ -64,17 +64,17 @@ class TC15ScriptContractTests(unittest.TestCase):
         )
 
         readiness_step = self.source[
-            self.source.index('{name: "Wait for notation page to settle"'):
+            self.source.index('{name: "Bounded UI stabilization after score creation"'):
             self.source.index('{name: "Verify \'Score view\' was announced on score open"')
         ]
         self.assertNotRegex(readiness_step, r"api\.navigation\.")
-        self.assertIn(
+        self.assertNotIn(
             "api.testflow.seeChanges(NOTATION_SETTLE_MSEC)",
             readiness_step,
         )
-    def test_readiness_wait_follows_bounded_observed_keyboard_submission(self):
+    def test_bounded_ui_stabilization_follows_observed_keyboard_submission(self):
         create_score = self.source.index('{name: "Create score"')
-        settle_step = self.source.index('{name: "Wait for notation page to settle"')
+        settle_step = self.source.index('{name: "Bounded UI stabilization after score creation"')
         create_step = self.source[create_score:settle_step]
         submitter_start = self.source.index("function readActiveNavigationPath()")
         submitter = self.source[submitter_start:create_score]
@@ -82,9 +82,20 @@ class TC15ScriptContractTests(unittest.TestCase):
             "waitForNotationPage()",
             settle_step,
         )
+        done_trigger = self.source.index(
+            "api.navigation.triggerControl(",
+            submitter_start,
+        )
         settle_yield = self.source.index(
             "api.testflow.seeChanges(NOTATION_SETTLE_MSEC)",
-            settle_step,
+            submitter_start,
+        )
+        wait_helper_start = self.source.index("function waitForNotationPage")
+        wait_helper_end = self.source.index("var testCase", wait_helper_start)
+        wait_helper = self.source[wait_helper_start:wait_helper_end]
+        self.assertIn(
+            "api.interactive.isOpened(NOTATION_PAGE_URI)",
+            wait_helper,
         )
         first_navigation_assertion = self.source.index(
             "Expected announcement after opening score",
@@ -119,9 +130,9 @@ class TC15ScriptContractTests(unittest.TestCase):
         self.assertNotIn("api.navigation.goToControl", create_step)
         self.assertNotIn("api.testflow.seeChanges", create_step)
         self.assertIn("submitNewScoreDialog()", create_step)
-        self.assertLess(create_score, wait_for_page)
-        self.assertLess(wait_for_page, settle_yield)
-        self.assertLess(settle_yield, first_navigation_assertion)
+        self.assertLess(done_trigger, settle_yield)
+        self.assertLess(settle_yield, wait_for_page)
+        self.assertLess(wait_for_page, first_navigation_assertion)
 
         return_step = self.source.index(
             '{name: "Return to score canvas — should announce \'Score view\'"',

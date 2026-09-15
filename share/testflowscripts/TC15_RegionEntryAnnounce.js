@@ -46,6 +46,8 @@ function triggerEnabledDone(visitedPaths)
     if (!api.navigation.triggerControl(NEW_SCORE_SECTION, NEW_SCORE_BOTTOM_PANEL, "Done")) {
         failNewScoreNavigation("Enabled Done control could not be triggered", visitedPaths)
     }
+    // Let the primary-page transition complete before any route-state query.
+    api.testflow.seeChanges(NOTATION_SETTLE_MSEC)
 }
 
 function submitNewScoreDialog()
@@ -172,10 +174,8 @@ var testCase = {
         {name: "Create score", func: function() {
             submitNewScoreDialog()
         }},
-        {name: "Wait for notation page to settle", func: function() {
+        {name: "Bounded UI stabilization after score creation", func: function() {
             waitForNotationPage()
-            // Keep the route gate separate from this bounded event-loop yield.
-            api.testflow.seeChanges(NOTATION_SETTLE_MSEC)
         }},
         {name: "Verify 'Score view' was announced on score open", func: function() {
             var ann = api.accessibility.announcement()
