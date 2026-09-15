@@ -48,5 +48,10 @@ target_sources(musesounds PRIVATE
 )
 
 target_link_libraries(musesounds PRIVATE Qt::Concurrent)
+if(MUE_ENABLE_MUSESOUNDS_PROMOTIONS)
+    target_compile_definitions(musesounds PRIVATE MUE_ENABLE_MUSESOUNDS_PROMOTIONS=1)
+else()
+    target_compile_definitions(musesounds PRIVATE MUE_ENABLE_MUSESOUNDS_PROMOTIONS=0)
+endif()
 
 add_subdirectory(qml/MuseScore/MuseSounds)

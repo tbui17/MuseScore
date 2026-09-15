@@ -1296,9 +1296,16 @@ try {
             Assert-True (Test-Path -LiteralPath $iniPath -PathType Leaf) "the helper must seed the development profile INI: $iniPath"
             Assert-True (-not (Test-Path -LiteralPath (Join-Path $settingsRoot 'MuseScoreStudio5.ini'))) 'the helper must not seed an official/stable profile alias'
             $iniLines = @([IO.File]::ReadAllText($iniPath) -split "`r`n")
-            foreach ($expectedLine in @('[application]', 'hasCompletedFirstLaunchSetup=true', 'welcomeDialogShowOnStartup=false', 'welcomeDialogLastShownVersion=5.0.0')) {
+            foreach ($expectedLine in @(
+                    '[application]',
+                    'hasCompletedFirstLaunchSetup=true',
+                    'welcomeDialogShowOnStartup=false',
+                    'welcomeDialogLastShownVersion=5.0.0',
+                    '[musesounds]',
+                    'checkForUpdate=false')) {
                 Assert-True ($iniLines -contains $expectedLine) "the seeded INI must contain '$expectedLine': $($iniLines -join ' | ')"
             }
+            Assert-True ($iniLines -notcontains 'checkForUpdateTestMode=true') 'the acceptance profile must never enable MuseSounds update test mode'
 
             # The fixture host hands the sandbox roots to the stub; the real Windows run does not
             # redirect the environment at all (the profile there comes from the known folders).

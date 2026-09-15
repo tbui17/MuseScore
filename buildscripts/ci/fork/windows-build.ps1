@@ -804,6 +804,7 @@ $buildEnvironment = [ordered]@{
     MUSESCORE_BUILD_CRASHPAD_CLIENT           = "OFF"
     MUSESCORE_CRASHREPORT_URL                 = ""
     MUSESCORE_MODULE_UPDATE                   = "OFF"
+    MUSESCORE_ENABLE_MUSESOUNDS_PROMOTIONS    = "OFF"
     MUSESCORE_BUILD_UNIT_TESTS                = "OFF"
     MUSESCORE_UNIT_TESTS_ENABLE_CODE_COVERAGE = "OFF"
     MUSESCORE_BUILD_VST_MODULE                = "ON"
@@ -855,6 +856,7 @@ $cacheFlags = [ordered]@{
     MUSESCORE_BUILD_CRASHPAD_CLIENT         = $buildEnvironment.MUSESCORE_BUILD_CRASHPAD_CLIENT
     MUSESCORE_CRASHREPORT_URL               = $buildEnvironment.MUSESCORE_CRASHREPORT_URL
     MUSESCORE_MODULE_UPDATE                 = $buildEnvironment.MUSESCORE_MODULE_UPDATE
+    MUSESCORE_ENABLE_MUSESOUNDS_PROMOTIONS  = $buildEnvironment.MUSESCORE_ENABLE_MUSESOUNDS_PROMOTIONS
     MUSESCORE_BUILD_UNIT_TESTS              = $buildEnvironment.MUSESCORE_BUILD_UNIT_TESTS
     MUSESCORE_UNIT_TESTS_ENABLE_CODE_COVERAGE = $buildEnvironment.MUSESCORE_UNIT_TESTS_ENABLE_CODE_COVERAGE
     MUSESCORE_BUILD_VST_MODULE              = $buildEnvironment.MUSESCORE_BUILD_VST_MODULE
@@ -980,6 +982,7 @@ $expectedOff = @(
     "MUE_DOWNLOAD_SOUNDFONT",                    # source-pinned soundfont, no network refresh
     "MUSE_MODULE_DIAGNOSTICS_CRASHPAD_CLIENT",   # no crash upload
     "MUSE_MODULE_UPDATE",                        # no upstream update delivery
+    "MUE_ENABLE_MUSESOUNDS_PROMOTIONS",          # no upstream MuseHub promotions
     "MUSE_ENABLE_UNIT_TESTS",
     "MUSE_ENABLE_UNIT_TESTS_CODE_COVERAGE"
 )

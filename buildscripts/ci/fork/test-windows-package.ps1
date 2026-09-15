@@ -1916,19 +1916,21 @@ if ($script:IsWindowsHost) {
 }
 Assert-ProfilePlanUsable -Plan $profilePlan
 
-# Settings declared by this revision (src/appshell/internal/appshellconfiguration.cpp):
-# "application/hasCompletedFirstLaunchSetup", "application/welcomeDialogShowOnStartup" and
-# "application/welcomeDialogLastShownVersion". QSettings IniFormat stores "group/key" as section
-# [group] with entry key. The completed flag keeps StartupScenario::startupScenarioUI() from
-# opening the first-launch wizard, and a last-shown version equal to MUSE_APP_VERSION keeps the
-# welcome dialog from being forced back on: muse::Version keeps only the first three numeric
-# components, so "x.y.z" compares equal to the application version plus build number.
+# Settings declared by this revision:
+# - src/appshell/internal/appshellconfiguration.cpp provides the three application keys.
+# - src/musesounds/internal/musesoundsconfiguration.cpp provides "musesounds/checkForUpdate".
+# QSettings IniFormat stores "group/key" as section [group] with entry key. The completed flag
+# keeps StartupScenario::startupScenarioUI() from opening the first-launch wizard, and a last-shown
+# version equal to MUSE_APP_VERSION keeps the welcome dialog from being forced back on:
+# muse::Version keeps only the first three numeric components, so "x.y.z" compares equal to the
+# application version plus build number. The MuseSounds setting prevents a network-driven
+# promotion from entering a synchronous nested event loop during deterministic package acceptance.
 $welcomeVersion = "$($sourceVersion['MUSE_APP_VERSION_MAJOR']).$($sourceVersion['MUSE_APP_VERSION_MINOR']).$($sourceVersion['MUSE_APP_VERSION_PATCH'])"
 $manifestApplicationVersion = ([string] (Get-JsonField -Object $manifest -Name 'application_version')).Trim()
 if ($manifestApplicationVersion -ne $welcomeVersion -and -not $manifestApplicationVersion.StartsWith("$welcomeVersion.", [StringComparison]::Ordinal)) {
     Fail "manifest application_version '$manifestApplicationVersion' does not match the source version '$welcomeVersion'"
 }
-$iniContent = "[application]`r`nhasCompletedFirstLaunchSetup=true`r`nwelcomeDialogShowOnStartup=false`r`nwelcomeDialogLastShownVersion=$welcomeVersion`r`n"
+$iniContent = "[application]`r`nhasCompletedFirstLaunchSetup=true`r`nwelcomeDialogShowOnStartup=false`r`nwelcomeDialogLastShownVersion=$welcomeVersion`r`n[musesounds]`r`ncheckForUpdate=false`r`n"
 New-Item -ItemType Directory -Path $profilePlan.SettingsDirectory -Force | Out-Null
 [IO.File]::WriteAllText($profilePlan.SettingsFilePath, $iniContent, [Text.UTF8Encoding]::new($false))
 Write-Host "seeded first-run settings in $($profilePlan.SettingsFilePath)"

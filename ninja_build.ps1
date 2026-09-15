@@ -174,6 +174,7 @@ $MuseScoreBuildUnitTests = Get-EnvDefault "MUSESCORE_BUILD_UNIT_TESTS" "OFF"
 $MuseScoreUnitTestsEnableCodeCoverage = Get-EnvDefault "MUSESCORE_UNIT_TESTS_ENABLE_CODE_COVERAGE" "OFF"
 $MuseScoreNoRpath = Get-EnvDefault "MUSESCORE_NO_RPATH" "OFF"
 $MuseScoreModuleUpdate = Get-EnvDefault "MUSESCORE_MODULE_UPDATE" "ON"
+$MuseScoreEnableMuseSoundsPromotions = Get-EnvDefault "MUSESCORE_ENABLE_MUSESOUNDS_PROMOTIONS" "ON"
 $MuseScoreBuildVstModule = Get-EnvDefault "MUSESCORE_BUILD_VST_MODULE" "OFF"
 $MuseScoreBuildWebsocket = Get-EnvDefault "MUSESCORE_BUILD_WEBSOCKET" "OFF"
 $MuseScoreBuildPipewireAudioDriver = Get-EnvDefault "MUSESCORE_BUILD_PIPEWIRE_AUDIO_DRIVER" "OFF"
@@ -227,6 +228,7 @@ function Get-ConfigureArgs {
         "-DMUSESCORE_REVISION=$MuseScoreRevision",
         "-DMUE_RUN_LRELEASE=$MuseScoreRunLrelease",
         "-DMUSE_MODULE_UPDATE=$MuseScoreModuleUpdate",
+        "-DMUE_ENABLE_MUSESOUNDS_PROMOTIONS=$MuseScoreEnableMuseSoundsPromotions",
         "-DMUE_DOWNLOAD_SOUNDFONT=$MuseScoreDownloadSoundfont",
         "-DMUSE_ENABLE_UNIT_TESTS=$MuseScoreBuildUnitTests",
         "-DMUSE_ENABLE_UNIT_TESTS_CODE_COVERAGE=$MuseScoreUnitTestsEnableCodeCoverage",
