@@ -4,6 +4,9 @@ var NOTATION_PAGE_URI = "musescore://notation"
 var NOTATION_READY_TIMEOUT_MSEC = 30000
 var NOTATION_READY_POLL_MSEC = 100
 var NEW_SCORE_SECTION = "NewScoreDialog"
+var NEW_SCORE_SELECT_PATH = "NewScoreDialog/SelectPanel/Select"
+var NEW_SCORE_SCORE_LIST_PANEL = "ListView"
+var NEW_SCORE_BOTTOM_PANEL = "BottomPanel"
 var NEW_SCORE_DONE_PATH = "NewScoreDialog/BottomPanel/Done"
 var NEW_SCORE_NAV_MAX_TABS = 32
 var NEW_SCORE_NAV_SETTLE_MSEC = 100
@@ -29,6 +32,7 @@ function failNewScoreNavigation(message, visitedPaths)
 function submitNewScoreDialog()
 {
     var visitedPaths = []
+    var selectActivated = false
 
     for (var i = 0; i < NEW_SCORE_NAV_MAX_TABS; ++i) {
         var current = readActiveNavigationPath()
@@ -46,6 +50,64 @@ function submitNewScoreDialog()
             failNewScoreNavigation("Navigation cycle detected at " + current.value, visitedPaths)
         }
         visitedPaths.push(current.value)
+
+        if (current.value === NEW_SCORE_SELECT_PATH) {
+            if (selectActivated) {
+                failNewScoreNavigation("Select control was activated more than once", visitedPaths)
+            }
+            selectActivated = true
+
+            // Select is the state transition that populates the score list and
+            // enables the Done footer control.
+            api.keyboard.key("Return")
+            api.testflow.seeChanges(NEW_SCORE_NAV_SETTLE_MSEC)
+
+            var afterSelect = readActiveNavigationPath()
+            if (afterSelect.section !== NEW_SCORE_SECTION) {
+                failNewScoreNavigation("Select left active section " + NEW_SCORE_SECTION
+                                       + " at " + afterSelect.value, visitedPaths)
+            }
+            if (afterSelect.value === current.value) {
+                api.keyboard.key("Tab")
+                api.testflow.seeChanges(NEW_SCORE_NAV_SETTLE_MSEC)
+                afterSelect = readActiveNavigationPath()
+            }
+            if (afterSelect.value === current.value) {
+                failNewScoreNavigation("Select made no navigation progress at " + current.value, visitedPaths)
+            }
+            if (afterSelect.value !== NEW_SCORE_DONE_PATH
+                    && afterSelect.panel !== NEW_SCORE_SCORE_LIST_PANEL
+                    && afterSelect.panel !== NEW_SCORE_BOTTOM_PANEL) {
+                failNewScoreNavigation("Select did not expose a populated score list or Done control; got "
+                                       + afterSelect.value, visitedPaths)
+            }
+            if (afterSelect.panel === NEW_SCORE_SCORE_LIST_PANEL && !afterSelect.control) {
+                failNewScoreNavigation("Select exposed an empty score list; got "
+                                       + afterSelect.value, visitedPaths)
+            }
+            if (afterSelect.value === NEW_SCORE_DONE_PATH) {
+                api.keyboard.key("Return")
+                return
+            }
+            continue
+        }
+
+        if (current.panel === NEW_SCORE_BOTTOM_PANEL) {
+            // Tab changes panels, while End selects the last enabled footer
+            // control; with Done enabled this must be the exact target.
+            api.keyboard.key("End")
+            api.testflow.seeChanges(NEW_SCORE_NAV_SETTLE_MSEC)
+
+            var lastControl = readActiveNavigationPath()
+            if (lastControl.value === current.value) {
+                failNewScoreNavigation("End made no navigation progress at " + current.value, visitedPaths)
+            }
+            if (lastControl.value !== NEW_SCORE_DONE_PATH) {
+                failNewScoreNavigation("Expected Done after End, got " + lastControl.value, visitedPaths)
+            }
+            api.keyboard.key("Return")
+            return
+        }
 
         api.keyboard.key("Tab")
         api.testflow.seeChanges(NEW_SCORE_NAV_SETTLE_MSEC)
