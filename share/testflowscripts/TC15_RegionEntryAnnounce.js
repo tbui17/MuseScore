@@ -3,6 +3,75 @@ var Home = require("steps/Home.js")
 var NOTATION_PAGE_URI = "musescore://notation"
 var NOTATION_READY_TIMEOUT_MSEC = 30000
 var NOTATION_READY_POLL_MSEC = 100
+var NEW_SCORE_SECTION = "NewScoreDialog"
+var NEW_SCORE_DONE_PATH = "NewScoreDialog/BottomPanel/Done"
+var NEW_SCORE_NAV_MAX_TABS = 32
+var NEW_SCORE_NAV_SETTLE_MSEC = 100
+
+function readActiveNavigationPath()
+{
+    var section = api.navigation.activeSection()
+    var panel = api.navigation.activePanel()
+    var control = api.navigation.activeControl()
+    return {
+        section: section,
+        panel: panel,
+        control: control,
+        value: section + "/" + panel + "/" + control
+    }
+}
+
+function failNewScoreNavigation(message, visitedPaths)
+{
+    api.testflow.fatal(message + "; visited paths: " + visitedPaths.join(" -> "))
+}
+
+function submitNewScoreDialog()
+{
+    var visitedPaths = []
+
+    for (var i = 0; i < NEW_SCORE_NAV_MAX_TABS; ++i) {
+        var current = readActiveNavigationPath()
+        if (current.section !== NEW_SCORE_SECTION) {
+            failNewScoreNavigation("Expected active section " + NEW_SCORE_SECTION
+                                   + ", got " + current.value, visitedPaths)
+        }
+
+        if (current.value === NEW_SCORE_DONE_PATH) {
+            api.keyboard.key("Return")
+            return
+        }
+
+        if (visitedPaths.indexOf(current.value) !== -1) {
+            failNewScoreNavigation("Navigation cycle detected at " + current.value, visitedPaths)
+        }
+        visitedPaths.push(current.value)
+
+        api.keyboard.key("Tab")
+        api.testflow.seeChanges(NEW_SCORE_NAV_SETTLE_MSEC)
+
+        var next = readActiveNavigationPath()
+        if (next.section !== NEW_SCORE_SECTION) {
+            failNewScoreNavigation("Tab left active section " + NEW_SCORE_SECTION
+                                   + " at " + next.value, visitedPaths)
+        }
+        if (next.value === current.value) {
+            failNewScoreNavigation("Tab made no navigation progress at " + current.value, visitedPaths)
+        }
+        if (next.value !== NEW_SCORE_DONE_PATH
+                && visitedPaths.indexOf(next.value) !== -1) {
+            failNewScoreNavigation("Navigation cycle detected at " + next.value, visitedPaths)
+        }
+        if (next.value === NEW_SCORE_DONE_PATH) {
+            api.keyboard.key("Return")
+            return
+        }
+    }
+
+    failNewScoreNavigation("Done control was not reached within "
+                           + NEW_SCORE_NAV_MAX_TABS + " Tab steps", visitedPaths)
+}
+
 
 function waitForNotationPage()
 {
@@ -37,12 +106,7 @@ var testCase = {
             api.testflow.seeChanges()
         }},
         {name: "Create score", func: function() {
-            // Submit through the established New Score trigger path. Keep score
-            // readiness separate so this action has no post-submit stabilization.
-            var submitted = api.navigation.triggerControl("NewScoreDialog", "BottomPanel", "Done")
-            if (!submitted) {
-                api.testflow.fatal("New Score Done control was not available before submission")
-            }
+            submitNewScoreDialog()
         }},
         {name: "Wait for notation page to settle", func: function() {
             waitForNotationPage()

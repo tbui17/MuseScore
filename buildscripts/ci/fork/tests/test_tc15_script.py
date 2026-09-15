@@ -68,15 +68,12 @@ class TC15ScriptContractTests(unittest.TestCase):
         ]
         self.assertNotRegex(readiness_step, r"api\.navigation\.")
 
-    def test_readiness_wait_follows_direct_score_submission_and_precedes_assertions(self):
+    def test_readiness_wait_follows_bounded_observed_keyboard_submission(self):
         create_score = self.source.index('{name: "Create score"')
         settle_step = self.source.index('{name: "Wait for notation page to settle"')
         create_step = self.source[create_score:settle_step]
-        create_submit = self.source.index(
-            'api.navigation.triggerControl("NewScoreDialog", "BottomPanel", "Done")',
-            create_score,
-        )
-        submit_guard = self.source.index("if (!submitted)", create_score)
+        submitter_start = self.source.index("function readActiveNavigationPath()")
+        submitter = self.source[submitter_start:create_score]
         wait_for_page = self.source.index(
             "waitForNotationPage()",
             settle_step,
@@ -86,12 +83,24 @@ class TC15ScriptContractTests(unittest.TestCase):
             settle_step,
         )
 
-        self.assertNotIn("NewScore.done()", self.source)
+        self.assertIn('var NEW_SCORE_DONE_PATH = "NewScoreDialog/BottomPanel/Done"', self.source)
+        self.assertIn("var NEW_SCORE_NAV_MAX_TABS = 32", self.source)
+        self.assertIn("var NEW_SCORE_NAV_SETTLE_MSEC = 100", self.source)
+        self.assertIn("api.navigation.activeSection()", submitter)
+        self.assertIn("api.navigation.activePanel()", submitter)
+        self.assertIn("api.navigation.activeControl()", submitter)
+        self.assertIn('api.keyboard.key("Tab")', submitter)
+        self.assertIn('api.keyboard.key("Return")', submitter)
+        self.assertIn("visitedPaths", submitter)
+        self.assertIn("indexOf", submitter)
+        self.assertIn("Tab made no navigation progress", submitter)
+        self.assertIn("Navigation cycle detected", submitter)
+        self.assertIn("NEW_SCORE_NAV_MAX_TABS", submitter)
+        self.assertNotIn("api.navigation.triggerControl", self.source)
         self.assertNotIn("api.navigation.goToControl", create_step)
-        self.assertNotIn("api.keyboard.key", create_step)
         self.assertNotIn("api.testflow.seeChanges", create_step)
-        self.assertLess(create_submit, submit_guard)
-        self.assertLess(submit_guard, wait_for_page)
+        self.assertIn("submitNewScoreDialog()", create_step)
+        self.assertLess(create_score, wait_for_page)
         self.assertLess(wait_for_page, first_navigation_assertion)
 
         return_step = self.source.index(
