@@ -464,6 +464,11 @@ jobs:
             } else {
               $null
             }
+            dialog_monitor_sha256 = if ($env:DIAGNOSTIC_PROFILE -eq 'musesounds-update-test-mode') {
+              (Get-FileHash -LiteralPath 'pipeline/buildscripts/ci/fork/watch-musesounds-dialog.ps1' -Algorithm SHA256).Hash.ToLowerInvariant()
+            } else {
+              $null
+            }
             profile_delta = if ($env:DIAGNOSTIC_PROFILE -eq 'musesounds-update-test-mode') {
               [ordered]@{
                 section = 'musesounds'
@@ -495,13 +500,36 @@ jobs:
         env:
           MUSE_EXPECTED_WORKFLOW_SHA: de6b09e5d0ca500eb413ef03862242d2a03decd8
           MUSE_EXPECTED_FRAMEWORK_SHA: 54b1ab3353365c1d84119c8e1cd450c2a9e7bf80
-        run: >-
-          ./pipeline/buildscripts/ci/fork/test-windows-package.ps1
-          -ArtifactDirectory ./package
-          -SourceDirectory ./fixtures
-          -OutputDirectory './runtime results'
-          -MuseSoundsUpdateTestMode
-          -DiagnosticTestScript ./pipeline/buildscripts/ci/fork/TC_MuseSoundsUpdateTestModeControl.js
+        run: |
+          $evidencePath = Join-Path $PWD 'musesounds-dialog-evidence.json'
+          $monitorScript = Join-Path $PWD 'pipeline/buildscripts/ci/fork/watch-musesounds-dialog.ps1'
+          $monitor = Start-Process -FilePath pwsh -PassThru -ArgumentList @(
+            '-NoProfile', '-NonInteractive', '-File', $monitorScript,
+            '-EvidencePath', $evidencePath)
+
+          & ./pipeline/buildscripts/ci/fork/test-windows-package.ps1 `
+            -ArtifactDirectory ./package `
+            -SourceDirectory ./fixtures `
+            -OutputDirectory './runtime results' `
+            -MuseSoundsUpdateTestMode `
+            -DiagnosticTestScript ./pipeline/buildscripts/ci/fork/TC_MuseSoundsUpdateTestModeControl.js
+          $helperExit = $LASTEXITCODE
+
+          if (-not $monitor.WaitForExit(45000)) {
+            Stop-Process -Id $monitor.Id -Force
+            throw 'targeted MuseSounds dialog monitor did not finish'
+          }
+          if (-not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) {
+            throw 'targeted MuseSounds dialog monitor wrote no evidence'
+          }
+          $dialogEvidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
+          if ($monitor.ExitCode -ne 0 -or -not $dialogEvidence.opened -or
+              -not $dialogEvidence.settled -or -not $dialogEvidence.close_invoked -or
+              -not $dialogEvidence.closed -or
+              -not [string]::IsNullOrEmpty([string]$dialogEvidence.error)) {
+            throw "targeted MuseSounds dialog control failed: $($dialogEvidence | ConvertTo-Json -Compress)"
+          }
+          if ($helperExit -ne 0) { throw "runtime helper failed with exit code $helperExit" }
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -513,7 +541,9 @@ jobs:
         if: always()
         with:
           name: diagnostic-harness-delta-${{ github.run_id }}-${{ github.run_attempt }}
-          path: diagnostic-harness-delta.json
+          path: |
+            diagnostic-harness-delta.json
+            musesounds-dialog-evidence.json
           if-no-files-found: error
           retention-days: 14
 

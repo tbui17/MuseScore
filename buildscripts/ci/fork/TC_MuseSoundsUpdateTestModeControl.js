@@ -9,9 +9,6 @@ var NEW_SCORE_BOTTOM_PANEL = "BottomPanel"
 var NEW_SCORE_DONE_PATH = "NewScoreDialog/BottomPanel/Done"
 var NEW_SCORE_NAV_MAX_TABS = 32
 var NEW_SCORE_NAV_SETTLE_MSEC = 100
-var DIALOG_TIMEOUT_MSEC = 30000
-var DIALOG_POLL_MSEC = 100
-var DIALOG_SETTLE_MSEC = 750
 
 function readActiveNavigationPath()
 {
@@ -127,25 +124,12 @@ function submitNewScoreDialog()
                            + NEW_SCORE_NAV_MAX_TABS + " Tab steps", visitedPaths)
 }
 
-function waitForDialogState(expectedOpen, timeoutMsec)
-{
-    var attempts = timeoutMsec / DIALOG_POLL_MSEC
-    for (var i = 0; i < attempts; ++i) {
-        if (api.interactive.isOpened(RELEASE_DIALOG_URI) === expectedOpen) {
-            return
-        }
-        api.testflow.seeChanges(DIALOG_POLL_MSEC)
-    }
-    api.testflow.fatal("MuseSounds release dialog did not become "
-                       + (expectedOpen ? "open" : "closed")
-                       + " within " + timeoutMsec + " msec")
-}
 
 var testCase = {
     name: "Diagnostic control: MuseSounds update test mode dialog settles and closes",
-    description: "Prove that MuseSounds update test mode bypasses the live feed and opens the identified release dialog, then close only that dialog.",
+    description: "Open the deterministic MuseSounds promotion path and verify the targeted hosted-runner monitor closes only its identified dialog.",
     steps: [
-        {name: "Open a score to schedule the MuseSounds promotion", func: function() {
+        {name: "Open a score and enter the synchronous MuseSounds promotion", func: function() {
             api.dispatcher.dispatch("file-close")
             Home.goToHome()
             api.testflow.seeChanges(500)
@@ -155,22 +139,12 @@ var testCase = {
             NewScore.chooseInstrument("Keyboards", "Piano")
             api.testflow.seeChanges()
             submitNewScoreDialog()
+            api.testflow.seeChanges(5000)
         }},
-        {name: "Observe the identified MuseSounds release dialog opening", func: function() {
-            waitForDialogState(true, DIALOG_TIMEOUT_MSEC)
-        }},
-        {name: "Settle the identified MuseSounds release dialog", func: function() {
-            api.testflow.seeChanges(DIALOG_SETTLE_MSEC)
-            if (!api.interactive.isOpened(RELEASE_DIALOG_URI)) {
-                api.testflow.fatal("MuseSounds release dialog closed before the settlement observation")
+        {name: "Confirm the identified MuseSounds release dialog is closed", func: function() {
+            if (api.interactive.isOpened(RELEASE_DIALOG_URI)) {
+                api.testflow.fatal("MuseSounds release dialog remained open after targeted hosted-runner closure")
             }
-        }},
-        {name: "Close only the identified MuseSounds release dialog", func: function() {
-            if (!api.interactive.isOpened(RELEASE_DIALOG_URI)) {
-                api.testflow.fatal("MuseSounds release dialog was not open before targeted Escape")
-            }
-            api.keyboard.key("Escape")
-            waitForDialogState(false, DIALOG_TIMEOUT_MSEC)
         }}
     ]
 }
