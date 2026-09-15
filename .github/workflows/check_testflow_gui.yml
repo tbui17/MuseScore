@@ -8,6 +8,7 @@ on:
       - 'share/testflowscripts/**'
       - 'src/app/**'
       - 'src/appshell/**'
+      - 'muse'
       - 'muse/framework/interactive/**'
       - 'muse/framework/accessibility/**'
       - 'muse/framework/ui/api/**'
@@ -21,6 +22,7 @@ on:
       - 'share/testflowscripts/**'
       - 'src/app/**'
       - 'src/appshell/**'
+      - 'muse'
       - 'muse/framework/interactive/**'
       - 'muse/framework/accessibility/**'
       - 'muse/framework/ui/api/**'
@@ -145,7 +147,8 @@ jobs:
           $exe = Join-Path $PWD "build.release\MuseScoreStudio5.exe"
           $scripts = @(
             "TC11_CommandPaletteDialog.js",
-            "TC14_CommandPaletteAnnounce.js"
+            "TC14_CommandPaletteAnnounce.js",
+            "TC15_RegionEntryAnnounce.js"
           )
           if (-not (Test-Path $exe)) {
             Write-Host "::error::Build output not found: $exe"

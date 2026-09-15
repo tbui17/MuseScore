@@ -2,6 +2,13 @@ muse_create_thirdparty_module(liblouis)
 
 add_subdirectory(tables)
 
+if (MUSE_APP_INSTALL_RESOURCES_LOCATION)
+    # liblouis is LGPL-2.1 with the GPL-3.0 text for the programs it ships; its braille tables
+    # are installed as data, so the notices travel with them.
+    include(SetupLicenseNotices)
+    muse_install_license_notice(liblouis "${CMAKE_CURRENT_LIST_DIR}" "COPYING" "COPYING.LESSER" "License.md")
+endif()
+
 target_compile_definitions(liblouis PRIVATE
     TABLESDIR=dataPathPtr           # compileTranslationTable.c
 )

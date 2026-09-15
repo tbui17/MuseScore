@@ -49,6 +49,7 @@ private:
 class AppShellState;
 class ApplicationActionController;
 class ApplicationUiActions;
+class RegionEntryAnnouncer;
 class SessionsManager;
 class AppShellContext : public muse::modularity::IContextSetup
 {
@@ -67,5 +68,6 @@ private:
     std::shared_ptr<ApplicationActionController> m_applicationActionController;
     std::shared_ptr<ApplicationUiActions> m_applicationUiActions;
     std::shared_ptr<SessionsManager> m_sessionsManager;
+    std::shared_ptr<RegionEntryAnnouncer> m_regionEntryAnnouncer;
 };
 }

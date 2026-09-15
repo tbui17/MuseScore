@@ -136,10 +136,7 @@ void StartupScenario::registerAudioPlugins()
     //! (Thanks to the splashscreen, but this is not an obvious detail)
     qApp->setQuitLockEnabled(false);
 
-    Ret ret = registerAudioPluginsScenario()->updatePluginsRegistry();
-    if (!ret) {
-        LOGE() << ret.toString();
-    }
+    registerAudioPluginsScenario()->updatePluginsRegistry();
 
     qApp->setQuitLockEnabled(true);
 }
