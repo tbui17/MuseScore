@@ -52,6 +52,7 @@ param(
     [string] $ArtifactDirectory,
     [string] $SourceDirectory,
     [string] $OutputDirectory,
+    [string] $DiagnosticTestScript,
     [int] $VersionTimeoutSeconds = 60,
     [int] $ExportTimeoutSeconds = 300,
     [int] $GuiTimeoutSeconds = 600,
@@ -1693,16 +1694,25 @@ if ($ExportTimeoutDumpPlan) {
 # ---------------------------------------------------------------------------
 $artifactRoot = Resolve-RequiredDirectory -Path $ArtifactDirectory -Name 'ArtifactDirectory'
 $sourceRoot = Resolve-RequiredDirectory -Path $SourceDirectory -Name 'SourceDirectory'
-# TC11 and TC14 are mandatory for every package. Select the one reviewed feature case only when
-# its exact sparse fixture is present; a base checkout therefore remains a two-case run, while a
-# feature checkout cannot silently omit the installed counterpart.
-$script:RequiredTestScripts = @($script:MandatoryTestScripts)
-$featureSourceScript = Join-Path $sourceRoot (Join-Path 'share/testflowscripts' $script:FeatureTestScriptName)
-if (Test-Path -LiteralPath $featureSourceScript -PathType Leaf) {
-    $script:RequiredTestScripts += $script:FeatureTestScriptName
-    Write-Host "selected feature GUI test from exact source fixture: share/testflowscripts/$($script:FeatureTestScriptName)"
+# TC11 and TC14 plus an exact-source TC15 are the acceptance suite. A diagnostic script, when
+# explicitly supplied, replaces that suite and is copied into the isolated extraction only.
+$diagnosticSourceScript = $null
+if (-not [string]::IsNullOrWhiteSpace($DiagnosticTestScript)) {
+    if (-not (Test-Path -LiteralPath $DiagnosticTestScript -PathType Leaf)) {
+        Fail "-DiagnosticTestScript file not found: $DiagnosticTestScript"
+    }
+    $diagnosticSourceScript = (Resolve-Path -LiteralPath $DiagnosticTestScript).Path
+    $script:RequiredTestScripts = @([IO.Path]::GetFileName($diagnosticSourceScript))
+    Write-Host "selected diagnostic-only GUI control: $diagnosticSourceScript"
 } else {
-    Write-Host "feature GUI test not selected; exact source fixture is absent: share/testflowscripts/$($script:FeatureTestScriptName)"
+    $script:RequiredTestScripts = @($script:MandatoryTestScripts)
+    $featureSourceScript = Join-Path $sourceRoot (Join-Path 'share/testflowscripts' $script:FeatureTestScriptName)
+    if (Test-Path -LiteralPath $featureSourceScript -PathType Leaf) {
+        $script:RequiredTestScripts += $script:FeatureTestScriptName
+        Write-Host "selected feature GUI test from exact source fixture: share/testflowscripts/$($script:FeatureTestScriptName)"
+    } else {
+        Write-Host "feature GUI test not selected; exact source fixture is absent: share/testflowscripts/$($script:FeatureTestScriptName)"
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
@@ -1870,6 +1880,10 @@ try {
     $archive.Dispose()
 }
 [System.IO.Compression.ZipFile]::ExtractToDirectory($packagePath, $extractRoot)
+if ($null -ne $diagnosticSourceScript) {
+    $diagnosticDestination = Join-Path $extractRoot (Join-Path 'testflowscripts' ([IO.Path]::GetFileName($diagnosticSourceScript)))
+    Copy-Item -LiteralPath $diagnosticSourceScript -Destination $diagnosticDestination
+}
 
 $executableFullPath = Join-Path $extractRoot ($executableRelativePath -replace '/', [IO.Path]::DirectorySeparatorChar)
 if (-not (Test-Path -LiteralPath $executableFullPath -PathType Leaf)) {
@@ -2083,11 +2097,17 @@ foreach ($scriptName in $script:RequiredTestScripts) {
         continue
     }
 
-    $sourceScript = Join-Path $sourceRoot (Join-Path 'share/testflowscripts' $scriptName)
+    $sourceScript = if ($null -ne $diagnosticSourceScript) {
+        $diagnosticSourceScript
+    } else {
+        Join-Path $sourceRoot (Join-Path 'share/testflowscripts' $scriptName)
+    }
     if (-not (Test-Path -LiteralPath $sourceScript -PathType Leaf)) {
-        # Running the packaged copy would test whatever the package happens to contain
-        # instead of the reviewed test case, so a missing reviewed script fails the run.
-        Add-Failure "the reviewed script share/testflowscripts/$scriptName is missing from -SourceDirectory; refusing to run the packaged copy instead"
+        if ($null -ne $diagnosticSourceScript) {
+            Add-Failure "the diagnostic script $scriptName is missing; refusing to run an unreviewed copy"
+        } else {
+            Add-Failure "the reviewed script share/testflowscripts/$scriptName is missing from -SourceDirectory; refusing to run the packaged copy instead"
+        }
         continue
     }
     $sourceSha256 = Get-Sha256 -Path $sourceScript

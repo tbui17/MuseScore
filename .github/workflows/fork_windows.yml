@@ -459,6 +459,11 @@ jobs:
             framework_sha = $manifest.framework_sha
             workflow_sha = '${{ needs.preflight.outputs.workflow_sha }}'
             tc15_sha256 = (Get-FileHash -LiteralPath $tc15 -Algorithm SHA256).Hash.ToLowerInvariant()
+            positive_control_script_sha256 = if ($env:DIAGNOSTIC_PROFILE -eq 'musesounds-update-test-mode') {
+              (Get-FileHash -LiteralPath 'pipeline/buildscripts/ci/fork/TC_MuseSoundsUpdateTestModeControl.js' -Algorithm SHA256).Hash.ToLowerInvariant()
+            } else {
+              $null
+            }
             profile_delta = if ($env:DIAGNOSTIC_PROFILE -eq 'musesounds-update-test-mode') {
               [ordered]@{
                 section = 'musesounds'
@@ -484,118 +489,19 @@ jobs:
           -SourceDirectory ./fixtures
           -OutputDirectory './runtime results'
           -DisableMuseSoundsUpdateCheck
-      - name: Replay package through deterministic MuseSounds update test mode
+      - name: Replay deterministic MuseSounds update test-mode control
         if: inputs.diagnostic_runtime_profile == 'musesounds-update-test-mode'
         shell: pwsh
         env:
           MUSE_EXPECTED_WORKFLOW_SHA: de6b09e5d0ca500eb413ef03862242d2a03decd8
           MUSE_EXPECTED_FRAMEWORK_SHA: 54b1ab3353365c1d84119c8e1cd450c2a9e7bf80
-        run: |
-          $evidencePath = Join-Path $PWD 'musesounds-dialog-evidence.json'
-          $monitor = Start-Job -ArgumentList $evidencePath -ScriptBlock {
-            param($EvidencePath)
-            Add-Type -AssemblyName UIAutomationClient
-            Add-Type -AssemblyName UIAutomationTypes
-            $evidence = [ordered]@{
-              expected_uri = 'musescore://musesounds/musesoundsreleaseinfo'
-              expected_cancel_button = 'No thanks'
-              expected_action_button = 'Take me to MuseHub'
-              opened = $false
-              settled = $false
-              close_invoked = $false
-              closed = $false
-              process_id = $null
-              opened_at_utc = $null
-              close_invoked_at_utc = $null
-              closed_at_utc = $null
-              error = $null
-            }
-            try {
-              $root = [System.Windows.Automation.AutomationElement]::RootElement
-              $deadline = [DateTime]::UtcNow.AddMinutes(15)
-              while ([DateTime]::UtcNow -lt $deadline -and -not $evidence.opened) {
-                $cancelCondition = [System.Windows.Automation.PropertyCondition]::new(
-                  [System.Windows.Automation.AutomationElement]::NameProperty, 'No thanks')
-                $cancelButtons = $root.FindAll(
-                  [System.Windows.Automation.TreeScope]::Descendants, $cancelCondition)
-                foreach ($cancel in $cancelButtons) {
-                  $pid = $cancel.Current.ProcessId
-                  $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
-                  if ($null -eq $process -or $process.ProcessName -ne 'MuseScoreStudio5') { continue }
-                  $pidCondition = [System.Windows.Automation.PropertyCondition]::new(
-                    [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $pid)
-                  $actionNameCondition = [System.Windows.Automation.PropertyCondition]::new(
-                    [System.Windows.Automation.AutomationElement]::NameProperty, 'Take me to MuseHub')
-                  $actionCondition = [System.Windows.Automation.AndCondition]::new($pidCondition, $actionNameCondition)
-                  $action = $root.FindFirst(
-                    [System.Windows.Automation.TreeScope]::Descendants, $actionCondition)
-                  if ($null -eq $action) { continue }
-
-                  $evidence.opened = $true
-                  $evidence.process_id = $pid
-                  $evidence.opened_at_utc = [DateTime]::UtcNow.ToString('o')
-                  Start-Sleep -Milliseconds 750
-                  $evidence.settled = $true
-
-                  $cancelNameCondition = [System.Windows.Automation.PropertyCondition]::new(
-                    [System.Windows.Automation.AutomationElement]::NameProperty, 'No thanks')
-                  $targetCondition = [System.Windows.Automation.AndCondition]::new($pidCondition, $cancelNameCondition)
-                  $target = $root.FindFirst(
-                    [System.Windows.Automation.TreeScope]::Descendants, $targetCondition)
-                  if ($null -eq $target) { throw 'identified MuseSounds cancel button disappeared before settlement' }
-                  $invoke = $target.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                  $invoke.Invoke()
-                  $evidence.close_invoked = $true
-                  $evidence.close_invoked_at_utc = [DateTime]::UtcNow.ToString('o')
-
-                  $closeDeadline = [DateTime]::UtcNow.AddSeconds(30)
-                  do {
-                    Start-Sleep -Milliseconds 100
-                    $remaining = $root.FindFirst(
-                      [System.Windows.Automation.TreeScope]::Descendants, $targetCondition)
-                  } while ($null -ne $remaining -and [DateTime]::UtcNow -lt $closeDeadline)
-                  if ($null -ne $remaining) { throw 'identified MuseSounds dialog did not close within 30 seconds' }
-                  $evidence.closed = $true
-                  $evidence.closed_at_utc = [DateTime]::UtcNow.ToString('o')
-                  break
-                }
-                if (-not $evidence.opened) { Start-Sleep -Milliseconds 100 }
-              }
-              if (-not $evidence.opened) { throw 'identified MuseSounds update dialog did not open within 15 minutes' }
-            } catch {
-              $evidence.error = $_.Exception.Message
-            } finally {
-              $evidence | ConvertTo-Json -Depth 4 |
-                Set-Content -LiteralPath $EvidencePath -Encoding utf8NoBOM
-            }
-          }
-
-          & ./pipeline/buildscripts/ci/fork/test-windows-package.ps1 `
-            -ArtifactDirectory ./package `
-            -SourceDirectory ./fixtures `
-            -OutputDirectory './runtime results' `
-            -MuseSoundsUpdateTestMode
-          $helperExit = $LASTEXITCODE
-
-          $null = Wait-Job -Job $monitor -Timeout 45
-          if ($monitor.State -ne 'Completed') {
-            Stop-Job -Job $monitor
-            Remove-Job -Job $monitor -Force
-            throw 'MuseSounds dialog monitor did not complete'
-          }
-          Receive-Job -Job $monitor
-          Remove-Job -Job $monitor
-
-          if ($helperExit -ne 0) { throw "runtime helper failed with exit code $helperExit" }
-          if (-not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) {
-            throw 'MuseSounds dialog evidence was not written'
-          }
-          $dialogEvidence = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
-          if (-not $dialogEvidence.opened -or -not $dialogEvidence.settled -or
-              -not $dialogEvidence.close_invoked -or -not $dialogEvidence.closed -or
-              -not [string]::IsNullOrEmpty([string]$dialogEvidence.error)) {
-            throw "MuseSounds dialog control failed: $($dialogEvidence | ConvertTo-Json -Compress)"
-          }
+        run: >-
+          ./pipeline/buildscripts/ci/fork/test-windows-package.ps1
+          -ArtifactDirectory ./package
+          -SourceDirectory ./fixtures
+          -OutputDirectory './runtime results'
+          -MuseSoundsUpdateTestMode
+          -DiagnosticTestScript ./pipeline/buildscripts/ci/fork/TC_MuseSoundsUpdateTestModeControl.js
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -607,9 +513,7 @@ jobs:
         if: always()
         with:
           name: diagnostic-harness-delta-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            diagnostic-harness-delta.json
-            musesounds-dialog-evidence.json
+          path: diagnostic-harness-delta.json
           if-no-files-found: error
           retention-days: 14
 
