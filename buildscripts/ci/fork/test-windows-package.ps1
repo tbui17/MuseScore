@@ -57,7 +57,9 @@ param(
     [int] $GuiTimeoutSeconds = 600,
     # Testability hook (see the "Testability hook" section): resolves and validates the first-run
     # profile contract for the -OutputDirectory sandbox instead of running the package.
-    [switch] $ExportProfilePlan
+    [switch] $ExportProfilePlan,
+    # Testability hook for the bounded timeout dump path and rundll32 argument contract.
+    [switch] $ExportTimeoutDumpPlan
 )
 
 $ErrorActionPreference = 'Stop'
@@ -94,6 +96,7 @@ $script:ProcessSnapshotTimeoutSeconds = 5
 $script:TimeoutStackDiagnosticsSeconds = 30
 $script:TimeoutStackToolMaxSeconds = 5
 $script:TimeoutStackOutputMaxBytes = 2MB
+$script:TimeoutStackBufferBytes = 1MB
 
 # Profile sandbox layout used for the POSIX fixture host and for the plan testability hook; a real
 # Windows run uses the known folders instead of this sandbox (see the first-run profile section).
@@ -897,31 +900,289 @@ function Invoke-TimeoutDiagnosticTool {
     return $result
 }
 
-function Capture-TimeoutStackDiagnostics {
-    <#
-        Captures bounded debugger output and a same-user Windows minidump before a timed-out
-        application is killed. This is evidence only: every failure here is written to the
-        diagnostic directory and never changes the original timeout result.
-    #>
+function Get-ComsvcsMiniDumpArguments {
+    param(
+        [Parameter(Mandatory = $true)][string] $ComsvcsDllPath,
+        [Parameter(Mandatory = $true)][int] $RootProcessId,
+        [Parameter(Mandatory = $true)][string] $DumpPath,
+        [switch] $Small
+    )
+
+    $dumpType = if ($Small) { '0x1000' } else { 'full' }
+    return @(
+        "$ComsvcsDllPath,MiniDump"
+        [string] $RootProcessId
+        $DumpPath
+        $dumpType
+    )
+}
+
+function Get-TimeoutDumpPlan {
     param(
         [Parameter(Mandatory = $true)][int] $RootProcessId,
+        [Parameter(Mandatory = $true)][string] $OutputDirectory,
+        [Parameter(Mandatory = $true)][string] $ComsvcsDllPath
+    )
+
+    $runnerTemp = [string] $env:RUNNER_TEMP
+    if ([string]::IsNullOrWhiteSpace($runnerTemp)) {
+        throw 'RUNNER_TEMP is required for a space-free comsvcs dump path'
+    }
+    $runnerTemp = Resolve-FullPath -Path $runnerTemp
+    if ($runnerTemp.Contains(' ')) {
+        throw "RUNNER_TEMP must not contain spaces for comsvcs MiniDump: $runnerTemp"
+    }
+    $workingDirectory = Resolve-FullPath -Path $OutputDirectory
+    $dumpName = "muse-timeout-$RootProcessId-$([Guid]::NewGuid().ToString('N'))"
+    $tempDumpPath = Join-Path $runnerTemp "$dumpName.dmp"
+    return [ordered]@{
+        runner_temp              = $runnerTemp
+        working_directory       = $workingDirectory
+        temp_dump_path           = $tempDumpPath
+        diagnostic_archive_path  = Join-Path $workingDirectory 'comsvcs-minidump.zip'
+        full_arguments           = @(Get-ComsvcsMiniDumpArguments `
+                -ComsvcsDllPath $ComsvcsDllPath -RootProcessId $RootProcessId -DumpPath $tempDumpPath)
+        small_arguments          = @(Get-ComsvcsMiniDumpArguments `
+                -ComsvcsDllPath $ComsvcsDllPath -RootProcessId $RootProcessId -DumpPath $tempDumpPath -Small)
+    }
+}
+
+function Compress-TimeoutDump {
+    param(
+        [Parameter(Mandatory = $true)][string] $SourcePath,
+        [Parameter(Mandatory = $true)][string] $DestinationPath,
+        [Parameter(Mandatory = $true)][DateTime] $Deadline
+    )
+
+    $inputStream = $null
+    $archive = $null
+    $entryStream = $null
+    try {
+        $inputStream = [IO.File]::OpenRead($SourcePath)
+        $archive = [IO.Compression.ZipFile]::Open(
+            $DestinationPath,
+            [IO.Compression.ZipArchiveMode]::Create)
+        $entry = $archive.CreateEntry(
+            [IO.Path]::GetFileName($SourcePath),
+            [IO.Compression.CompressionLevel]::Optimal)
+        $entryStream = $entry.Open()
+        $buffer = New-Object -TypeName byte[] -ArgumentList $script:TimeoutStackBufferBytes
+        while ($true) {
+            if ([DateTime]::UtcNow -ge $Deadline) {
+                throw 'timeout dump compression deadline reached'
+            }
+            $bytesRead = $inputStream.Read($buffer, 0, $buffer.Length)
+            if ($bytesRead -le 0) {
+                break
+            }
+            $entryStream.Write($buffer, 0, $bytesRead)
+        }
+    } finally {
+        if ($null -ne $entryStream) {
+            $entryStream.Dispose()
+        }
+        if ($null -ne $archive) {
+            $archive.Dispose()
+        }
+        if ($null -ne $inputStream) {
+            $inputStream.Dispose()
+        }
+    }
+    return [long] (Get-Item -LiteralPath $DestinationPath -ErrorAction Stop).Length
+}
+
+function Save-TimeoutCaptureRecord {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary] $Capture,
+        [Parameter(Mandatory = $true)][string] $Path
+    )
+
+    try {
+        [IO.File]::WriteAllText(
+            $Path,
+            ($Capture | ConvertTo-Json -Depth 12),
+            [Text.UTF8Encoding]::new($false))
+    } catch {
+        # Evidence metadata is best effort and cannot change the original timeout result.
+    }
+}
+
+function Finalize-TimeoutStackDiagnostics {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary] $Capture,
         [Parameter(Mandatory = $true)][string] $OutputDirectory
     )
 
     $deadline = [DateTime]::UtcNow.AddSeconds($script:TimeoutStackDiagnosticsSeconds)
+    $tempDumpPath = [string] $Capture.temp_dump_path
+    $archivePath = Join-Path $OutputDirectory 'comsvcs-minidump.zip'
+    $rawPath = Join-Path $OutputDirectory 'comsvcs-minidump.dmp'
+    if (-not [string]::IsNullOrWhiteSpace($tempDumpPath) `
+            -and (Test-Path -LiteralPath $tempDumpPath -PathType Leaf)) {
+        try {
+            $rawBytes = [long] (Get-Item -LiteralPath $tempDumpPath -ErrorAction Stop).Length
+            $Capture.raw_dump_bytes = $rawBytes
+            if ($rawBytes -gt $script:TimeoutDiagnosticsMaxBytes) {
+                $Capture.finalize_error = `
+                    "raw dump exceeded the $($script:TimeoutDiagnosticsMaxBytes)-byte cap"
+            } else {
+                try {
+                    $compressedBytes = Compress-TimeoutDump `
+                        -SourcePath $tempDumpPath -DestinationPath $archivePath -Deadline $deadline
+                    $Capture.compressed_dump_bytes = $compressedBytes
+                    if ($compressedBytes -le $script:TimeoutDiagnosticsMaxBytes) {
+                        $Capture.stored_path = $archivePath
+                        $Capture.stored_bytes = $compressedBytes
+                        $Capture.stored_format = 'zip'
+                    } else {
+                        Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+                        $Capture.compressed_dump_rejected = `
+                            "compressed dump exceeded the $($script:TimeoutDiagnosticsMaxBytes)-byte cap"
+                    }
+                } catch {
+                    Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+                    $Capture.compression_error = $_.Exception.Message
+                }
+
+                if ([string]::IsNullOrWhiteSpace([string] $Capture.stored_path)) {
+                    if ([DateTime]::UtcNow -lt $deadline) {
+                        Copy-Item -LiteralPath $tempDumpPath -Destination $rawPath -Force
+                        $storedBytes = [long] (Get-Item -LiteralPath $rawPath -ErrorAction Stop).Length
+                        if ($storedBytes -le $script:TimeoutDiagnosticsMaxBytes) {
+                            $Capture.stored_path = $rawPath
+                            $Capture.stored_bytes = $storedBytes
+                            $Capture.stored_format = 'dmp'
+                        } else {
+                            Remove-Item -LiteralPath $rawPath -Force -ErrorAction SilentlyContinue
+                            $Capture.raw_dump_rejected = `
+                                "copied dump exceeded the $($script:TimeoutDiagnosticsMaxBytes)-byte cap"
+                        }
+                    }
+                }
+            }
+        } catch {
+            $Capture.finalize_error = $_.Exception.Message
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace($tempDumpPath)) {
+        $Capture.finalize_error = 'captured dump was missing before diagnostic finalization'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($tempDumpPath) `
+            -and (Test-Path -LiteralPath $tempDumpPath -PathType Leaf)) {
+        Remove-Item -LiteralPath $tempDumpPath -Force -ErrorAction SilentlyContinue
+    }
+    Save-TimeoutCaptureRecord -Capture $Capture `
+        -Path (Join-Path $OutputDirectory 'timeout-capture.json')
+    return $Capture
+}
+
+
+function Get-TimeoutSymbolPlan {
+    param([string] $ExecutablePath)
+
+    $moduleDirectory = ''
+    if (-not [string]::IsNullOrWhiteSpace($ExecutablePath)) {
+        try {
+            $moduleDirectory = Split-Path -Parent (Resolve-FullPath -Path $ExecutablePath)
+        } catch {
+            $moduleDirectory = Split-Path -Parent $ExecutablePath
+        }
+    }
+    $searchRoots = @()
+    if (-not [string]::IsNullOrWhiteSpace($moduleDirectory)) {
+        $searchRoots += $moduleDirectory
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string] $env:RUNNER_TEMP)) {
+        $searchRoots += (Resolve-FullPath -Path $env:RUNNER_TEMP)
+    }
+    $searchRoots = @($searchRoots | Select-Object -Unique)
+    $pdbFiles = @()
+    $moduleFiles = @()
+    $probeErrors = @()
+    foreach ($root in $searchRoots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+            continue
+        }
+        try {
+            if ($pdbFiles.Count -lt 100) {
+                $pdbFiles += @([IO.Directory]::EnumerateFiles($root, '*.pdb', [IO.SearchOption]::TopDirectoryOnly) |
+                    Select-Object -First (100 - $pdbFiles.Count))
+            }
+            if ($root -eq $moduleDirectory -and $moduleFiles.Count -lt 200) {
+                $moduleFiles += @([IO.Directory]::EnumerateFiles($root, '*.dll', [IO.SearchOption]::TopDirectoryOnly) |
+                    Select-Object -First (200 - $moduleFiles.Count))
+            }
+        } catch {
+            $probeErrors += "${root}: $($_.Exception.Message)"
+        }
+    }
+    return [ordered]@{
+        captured_at_utc       = [DateTime]::UtcNow.ToString('o')
+        executable             = $ExecutablePath
+        module_directory       = $moduleDirectory
+        module_files            = @($moduleFiles)
+        module_file_count      = $moduleFiles.Count
+        pdb_search_roots       = @($searchRoots)
+        pdb_files               = @($pdbFiles)
+        pdb_file_count         = $pdbFiles.Count
+        probe_errors            = @($probeErrors)
+        symbol_server           = 'https://msdl.microsoft.com/download/symbols'
+        debugger_commands      = @('.symfix', '.reload /f', '~* kv')
+    }
+}
+
+function Capture-TimeoutStackDiagnostics {
+    <#
+        Probes debugger availability and captures bounded text stacks before a timed-out
+        application is killed. The dump is written to RUNNER_TEMP with no spaces in its path and
+        finalized under the diagnostic directory only after process-tree termination. This is
+        evidence only: every failure here is written to the diagnostic directory and never changes
+        the original timeout result.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][int] $RootProcessId,
+        [Parameter(Mandatory = $true)][string] $OutputDirectory,
+        [string] $ExecutablePath = ''
+    )
+
+    $metadataPath = Join-Path $OutputDirectory 'timeout-capture.json'
+    $capture = [ordered]@{
+        captured_at_utc       = [DateTime]::UtcNow.ToString('o')
+        root_process_id       = $RootProcessId
+        temp_dump_path        = $null
+        selected_dump_mode    = $null
+        raw_dump_bytes        = $null
+        compressed_dump_bytes = $null
+        stored_path            = $null
+        stored_bytes           = $null
+        stored_format          = $null
+        captures               = [ordered]@{}
+    }
     try {
         New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
     } catch {
-        return
+        $capture.capture_error = $_.Exception.Message
+        Save-TimeoutCaptureRecord -Capture $capture -Path $metadataPath
+        return $capture
+    }
+    try {
+        $capture.symbol_plan = Get-TimeoutSymbolPlan -ExecutablePath $ExecutablePath
+        [IO.File]::WriteAllText(
+            (Join-Path $OutputDirectory 'symbol-plan.json'),
+            ($capture.symbol_plan | ConvertTo-Json -Depth 8),
+            [Text.UTF8Encoding]::new($false))
+    } catch {
+        $capture.symbol_plan_error = $_.Exception.Message
     }
 
+    $deadline = [DateTime]::UtcNow.AddSeconds($script:TimeoutStackDiagnosticsSeconds)
     $candidates = [ordered]@{
         cdb = @('cdb.exe', 'cdb')
         windbg = @('windbg.exe', 'windbg')
         procdump = @('procdump.exe', 'procdump64.exe', 'procdump')
     }
     $availability = [ordered]@{
-        captured_at_utc = [DateTime]::UtcNow.ToString('o')
+        captured_at_utc = $capture.captured_at_utc
         root_process_id = $RootProcessId
         tools = [ordered]@{}
         captures = [ordered]@{}
@@ -938,12 +1199,14 @@ function Capture-TimeoutStackDiagnostics {
     try {
         [IO.File]::WriteAllText(
             $availabilityPath,
-            ($availability | ConvertTo-Json -Depth 6),
+            ($availability | ConvertTo-Json -Depth 8),
             [Text.UTF8Encoding]::new($false))
     } catch {
-        # Continue to the independent dump attempt even if the probe record cannot be written.
+        $capture.probe_error = $_.Exception.Message
     }
 
+    # CDB/WinDbg are attached only for a bounded text-stack attempt. qd detaches from the
+    # application so the helper remains the sole owner of process-tree termination.
     foreach ($label in @('cdb', 'windbg')) {
         $toolPath = $availability.tools[$label].path
         if ([string]::IsNullOrWhiteSpace([string] $toolPath)) {
@@ -956,7 +1219,6 @@ function Capture-TimeoutStackDiagnostics {
             -OutputPath $stackPath -Deadline $deadline
     }
 
-    $dumpPath = Join-Path $OutputDirectory 'comsvcs-minidump.dmp'
     $systemRoot = [string] $env:SystemRoot
     $rundll32 = if ([string]::IsNullOrWhiteSpace($systemRoot)) {
         $null
@@ -968,41 +1230,105 @@ function Capture-TimeoutStackDiagnostics {
     } else {
         Join-Path $systemRoot 'System32/comsvcs.dll'
     }
+    $plan = $null
     if ($null -ne $rundll32 -and (Test-Path -LiteralPath $rundll32 -PathType Leaf) `
             -and $null -ne $comsvcs -and (Test-Path -LiteralPath $comsvcs -PathType Leaf)) {
-        $arguments = @("$comsvcs,MiniDump", [string] $RootProcessId, $dumpPath, 'full')
-        $availability.captures.comsvcs = Invoke-TimeoutDiagnosticTool `
-            -Label 'comsvcs-minidump' -Executable $rundll32 -Arguments $arguments `
-            -OutputPath (Join-Path $OutputDirectory 'comsvcs-minidump.txt') -Deadline $deadline
-        if (Test-Path -LiteralPath $dumpPath -PathType Leaf) {
-            try {
-                $dumpBytes = [long] (Get-Item -LiteralPath $dumpPath -ErrorAction Stop).Length
-                $availability.captures.comsvcs.dump_bytes = $dumpBytes
-                if ($dumpBytes -gt $script:TimeoutDiagnosticsMaxBytes) {
-                    Remove-Item -LiteralPath $dumpPath -Force -ErrorAction SilentlyContinue
-                    $availability.captures.comsvcs.dump_rejected = `
-                        "dump exceeded the $($script:TimeoutDiagnosticsMaxBytes)-byte cap"
-                }
-            } catch {
-                $availability.captures.comsvcs.dump_error = $_.Exception.Message
-            }
-        } else {
-            $availability.captures.comsvcs.dump_missing = $true
+        try {
+            $plan = Get-TimeoutDumpPlan `
+                -RootProcessId $RootProcessId -OutputDirectory $OutputDirectory -ComsvcsDllPath $comsvcs
+            $capture.dump_plan = $plan
+        } catch {
+            $capture.dump_error = $_.Exception.Message
         }
     } else {
-        $availability.captures.comsvcs = [ordered]@{
-            error = 'System32 rundll32.exe or comsvcs.dll was unavailable'
+        $capture.dump_error = 'System32 rundll32.exe or comsvcs.dll was unavailable'
+    }
+
+    $selectedTempPath = $null
+    $selectedMode = $null
+    if ($null -ne $plan) {
+        $fullPath = [string] $plan.temp_dump_path
+        $fullResult = Invoke-TimeoutDiagnosticTool `
+            -Label 'comsvcs-minidump-full' -Executable $rundll32 `
+            -Arguments @($plan.full_arguments) `
+            -OutputPath (Join-Path $OutputDirectory 'comsvcs-minidump-full.txt') -Deadline $deadline
+        $availability.captures.comsvcs_full = $fullResult
+        if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+            try {
+                $fullBytes = [long] (Get-Item -LiteralPath $fullPath -ErrorAction Stop).Length
+                $fullResult.raw_dump_bytes = $fullBytes
+                $capture.full_dump_bytes = $fullBytes
+                if ($fullResult.exit_code -eq 0 -and $fullBytes -le $script:TimeoutDiagnosticsMaxBytes) {
+                    $selectedTempPath = $fullPath
+                    $selectedMode = 'full'
+                } elseif ($fullBytes -gt $script:TimeoutDiagnosticsMaxBytes) {
+                    $fullResult.rejected = `
+                        "full dump exceeded the $($script:TimeoutDiagnosticsMaxBytes)-byte cap"
+                }
+            } catch {
+                $fullResult.dump_error = $_.Exception.Message
+            }
+            if ($null -eq $selectedTempPath) {
+                Remove-Item -LiteralPath $fullPath -Force -ErrorAction SilentlyContinue
+            }
+        } else {
+            $fullResult.dump_missing = $true
+        }
+
+        # A full-memory dump can exceed the artifact cap. Retry with MiniDumpNormal plus
+        # MiniDumpWithThreadInfo (0x1000) so stack evidence remains available without changing the
+        # cap or deleting any other diagnostic file.
+        if ($null -eq $selectedTempPath) {
+            try {
+                $smallPlan = Get-TimeoutDumpPlan `
+                    -RootProcessId $RootProcessId -OutputDirectory $OutputDirectory -ComsvcsDllPath $comsvcs
+                $capture.small_dump_plan = $smallPlan
+                $smallPath = [string] $smallPlan.temp_dump_path
+                $smallResult = Invoke-TimeoutDiagnosticTool `
+                    -Label 'comsvcs-minidump-small' -Executable $rundll32 `
+                    -Arguments @($smallPlan.small_arguments) `
+                    -OutputPath (Join-Path $OutputDirectory 'comsvcs-minidump-small.txt') -Deadline $deadline
+                $availability.captures.comsvcs_small = $smallResult
+                if (Test-Path -LiteralPath $smallPath -PathType Leaf) {
+                    try {
+                        $smallBytes = [long] (Get-Item -LiteralPath $smallPath -ErrorAction Stop).Length
+                        $smallResult.raw_dump_bytes = $smallBytes
+                        $capture.small_dump_bytes = $smallBytes
+                        if ($smallResult.exit_code -eq 0 -and $smallBytes -le $script:TimeoutDiagnosticsMaxBytes) {
+                            $selectedTempPath = $smallPath
+                            $selectedMode = 'normal-thread-info'
+                        } elseif ($smallBytes -gt $script:TimeoutDiagnosticsMaxBytes) {
+                            $smallResult.rejected = `
+                                "small dump exceeded the $($script:TimeoutDiagnosticsMaxBytes)-byte cap"
+                        }
+                    } catch {
+                        $smallResult.dump_error = $_.Exception.Message
+                    }
+                    if ($null -eq $selectedTempPath) {
+                        Remove-Item -LiteralPath $smallPath -Force -ErrorAction SilentlyContinue
+                    }
+                } else {
+                    $smallResult.dump_missing = $true
+                }
+            } catch {
+                $capture.small_dump_error = $_.Exception.Message
+            }
         }
     }
 
+    $capture.temp_dump_path = $selectedTempPath
+    $capture.selected_dump_mode = $selectedMode
+    $capture.captures = $availability.captures
     try {
         [IO.File]::WriteAllText(
             $availabilityPath,
-            ($availability | ConvertTo-Json -Depth 8),
+            ($availability | ConvertTo-Json -Depth 12),
             [Text.UTF8Encoding]::new($false))
     } catch {
-        # Diagnostics are best effort and must not replace the timeout result.
+        $capture.probe_error = $_.Exception.Message
     }
+    Save-TimeoutCaptureRecord -Capture $capture -Path $metadataPath
+    return $capture
 }
 
 
@@ -1234,6 +1560,7 @@ function Invoke-BoundedProcess {
 
     $timedOut = $false
     $terminationConfirmed = $true
+    $timeoutStackCapture = $null
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         $timedOut = $true
         if (-not [string]::IsNullOrWhiteSpace($ProcessSnapshotRoot)) {
@@ -1241,12 +1568,20 @@ function Invoke-BoundedProcess {
                 -Path (Join-Path $ProcessSnapshotRoot 'process-before-termination.json') | Out-Null
             if ($script:IsWindowsHost) {
                 Write-Host '   capturing bounded debugger stacks and same-user minidump before termination'
-                Capture-TimeoutStackDiagnostics -RootProcessId $process.Id `
-                    -OutputDirectory (Join-Path $ProcessSnapshotRoot 'timeout-stacks')
+                $timeoutStackCapture = Capture-TimeoutStackDiagnostics -RootProcessId $process.Id `
+                    -OutputDirectory (Join-Path $ProcessSnapshotRoot 'timeout-stacks') `
+                    -ExecutablePath $Executable
             }
         }
         Write-Host "   TIMEOUT after ${TimeoutSeconds}s; terminating the process tree"
         $terminationConfirmed = Stop-ProcessTree -Process $process
+        if ($script:IsWindowsHost -and $null -ne $timeoutStackCapture) {
+            # The raw dump was created while the process was alive; only archive/copy it after
+            # process-tree termination so the uploaded file cannot keep the target suspended.
+            $timeoutStackCapture = Finalize-TimeoutStackDiagnostics `
+                -Capture $timeoutStackCapture `
+                -OutputDirectory (Join-Path $ProcessSnapshotRoot 'timeout-stacks')
+        }
         if (-not $terminationConfirmed) {
             Add-Failure "$Name did not exit within ${TimeoutSeconds}s and its process tree could not be terminated within $($script:KillTimeoutSeconds)s; the run cannot be bounded (log $stdoutPath)"
         }
@@ -1330,6 +1665,23 @@ if ($ExportProfilePlan) {
             profile_directory = $plan.ProfileDirectory
             log_directory     = $plan.LogDirectory
         })
+    exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Testability hook: bounded timeout dump path and argument contract
+# ---------------------------------------------------------------------------
+# Prints the same RUNNER_TEMP-derived dump path and rundll32 argument vectors used by a real
+# timeout. This keeps the path/quoting contract testable with a spaced work directory without
+# launching a debugger or touching another process.
+if ($ExportTimeoutDumpPlan) {
+    if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+        Fail '-ExportTimeoutDumpPlan requires -OutputDirectory'
+    }
+    $planComsvcs = 'C:\Windows\System32\comsvcs.dll'
+    $dumpPlan = Get-TimeoutDumpPlan `
+        -RootProcessId 1234 -OutputDirectory $OutputDirectory -ComsvcsDllPath $planComsvcs
+    ConvertTo-Json -Depth 8 -InputObject $dumpPlan
     exit 0
 }
 

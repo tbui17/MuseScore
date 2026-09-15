@@ -957,6 +957,31 @@ try {
         Assert-True ($result.Plan.log_directory -eq (Join-Path $local 'MuseScore/MuseScoreStudio5Development/logs')) "unexpected log directory: $($result.Plan.log_directory)"
     }
 
+    Invoke-Case 'runtime: timeout dump plan keeps spaced work root out of comsvcs path' {
+        $spacedRoot = Join-Path $WorkRoot 'spaced Work Root'
+        $runnerTemp = Join-Path $WorkRoot 'runner-temp'
+        New-Item -ItemType Directory -Path $spacedRoot, $runnerTemp -Force | Out-Null
+        $result = Invoke-ProfilePlan -Environment @{ RUNNER_TEMP = $runnerTemp } -Arguments @(
+            '-ExportTimeoutDumpPlan', '-OutputDirectory', $spacedRoot)
+        Assert-True ($result.ExitCode -eq 0) "timeout dump plan must resolve, got exit $($result.ExitCode): $($result.Text)"
+        Assert-True ($null -ne $result.Plan) "timeout dump plan must be JSON: $($result.Text)"
+        Assert-True ($result.Plan.working_directory -eq $spacedRoot) 'the plan must preserve the spaced work root for diagnostics'
+        Assert-True ($result.Plan.temp_dump_path -like "$runnerTemp*") `
+            "the comsvcs dump must be created under RUNNER_TEMP: $($result.Plan.temp_dump_path)"
+        Assert-True ($result.Plan.temp_dump_path -notmatch ' ') `
+            "the comsvcs dump path must not contain spaces: $($result.Plan.temp_dump_path)"
+        $fullArguments = @($result.Plan.full_arguments)
+        Assert-True ($fullArguments.Count -eq 4) 'full comsvcs invocation must have exactly four arguments'
+        Assert-True ($fullArguments[0] -eq 'C:\Windows\System32\comsvcs.dll,MiniDump') `
+            "unexpected comsvcs DLL export argument: $($fullArguments[0])"
+        Assert-True ($fullArguments[1] -eq '1234') 'comsvcs invocation must target the requested process'
+        Assert-True ($fullArguments[2] -eq $result.Plan.temp_dump_path) 'comsvcs must receive the space-free temporary dump path'
+        Assert-True ($fullArguments[3] -eq 'full') 'the first comsvcs attempt must request a full dump'
+        $smallArguments = @($result.Plan.small_arguments)
+        Assert-True ($smallArguments[3] -eq '0x1000') `
+            'the fallback comsvcs invocation must request MiniDumpNormal plus MiniDumpWithThreadInfo'
+    }
+
     Invoke-Case 'profile: an existing development profile is refused, never overwritten' {
         $root = Join-Path $WorkRoot 'profile-existing'
         $roaming = Join-Path $root 'profile/AppData/Roaming'
