@@ -37,6 +37,12 @@ var testCase = {
             api.testflow.seeChanges()
         }},
         {name: "Create score", func: function() {
+            // The dialog navigation tree is stable before submission. Select Done
+            // synchronously, then use the direct keyboard action to submit it.
+            var doneReady = api.navigation.goToControl("NewScoreDialog", "BottomPanel", "Done")
+            if (!doneReady) {
+                api.testflow.fatal("New Score Done control was not available before submission")
+            }
             api.keyboard.key("Return")
             api.testflow.seeChanges(2000)
         }},
