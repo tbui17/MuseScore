@@ -83,7 +83,7 @@ $logDirectory = Join-Path $env:LOCALAPPDATA 'MuseScore\MuseScoreStudio5Developme
 $evidence = [ordered]@{
     expected_process = 'MuseScoreStudio5.exe'
     expected_control_script = 'TC_MuseSoundsUpdateTestModeControl.js'
-    selection_rule = 'single visible non-New-score owned top-level window after the MuseSounds release-dialog QML marker, from the exact control process'
+    selection_rule = 'single visible non-main, non-New-score top-level window after the MuseSounds release-dialog QML marker, from the exact control process'
     dialog_log_marker_observed = $false
     dialog_log_path = $null
     opened = $false
@@ -91,6 +91,7 @@ $evidence = [ordered]@{
     close_invoked = $false
     closed = $false
     process_id = $null
+    main_window_handle = $null
     window_handle = $null
     owner_handle = $null
     window_class = $null
@@ -133,18 +134,20 @@ try {
                 }
             })
             $evidence.observed_windows = $observed
-            $owned = @($windows | Where-Object {
-                [MuseDialogWindowProbe]::GetWindow($_, $GW_OWNER) -ne [IntPtr]::Zero -and
+            $mainWindow = [Diagnostics.Process]::GetProcessById([int]$process.ProcessId).MainWindowHandle
+            $evidence.main_window_handle = $mainWindow.ToInt64()
+            $candidates = @($windows | Where-Object {
+                $_ -ne $mainWindow -and
                 [MuseDialogWindowProbe]::WindowText($_) -ne 'New score'
             })
-            if ($owned.Count -eq 0) {
+            if ($candidates.Count -eq 0) {
                 continue
             }
-            if ($owned.Count -ne 1) {
-                throw "expected one visible owned window for the exact control process, found $($owned.Count)"
+            if ($candidates.Count -ne 1) {
+                throw "expected one visible non-main dialog window for the exact control process, found $($candidates.Count)"
             }
 
-            $target = $owned[0]
+            $target = $candidates[0]
             $owner = [MuseDialogWindowProbe]::GetWindow($target, $GW_OWNER)
             $evidence.opened = $true
             $evidence.process_id = [int]$process.ProcessId

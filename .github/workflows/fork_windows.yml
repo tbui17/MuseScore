@@ -505,7 +505,7 @@ jobs:
           $monitorScript = Join-Path $PWD 'pipeline/buildscripts/ci/fork/watch-musesounds-dialog.ps1'
           $monitor = Start-Process -FilePath pwsh -PassThru -ArgumentList @(
             '-NoProfile', '-NonInteractive', '-File', $monitorScript,
-            '-EvidencePath', $evidencePath)
+            '-EvidencePath', $evidencePath, '-OpenTimeoutSeconds', '120')
 
           & ./pipeline/buildscripts/ci/fork/test-windows-package.ps1 `
             -ArtifactDirectory ./package `
