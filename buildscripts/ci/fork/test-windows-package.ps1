@@ -60,8 +60,9 @@ param(
     [switch] $ExportProfilePlan,
     # Testability hook for the bounded timeout dump path and rundll32 argument contract.
     [switch] $ExportTimeoutDumpPlan,
-    # Diagnostic-only profile delta. This does not alter package or source identity.
-    [switch] $DisableMuseSoundsUpdateCheck
+    # Diagnostic-only profile deltas. These do not alter package or source identity.
+    [switch] $DisableMuseSoundsUpdateCheck,
+    [switch] $MuseSoundsUpdateTestMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1931,7 +1932,9 @@ if ($manifestApplicationVersion -ne $welcomeVersion -and -not $manifestApplicati
     Fail "manifest application_version '$manifestApplicationVersion' does not match the source version '$welcomeVersion'"
 }
 $iniContent = "[application]`r`nhasCompletedFirstLaunchSetup=true`r`nwelcomeDialogShowOnStartup=false`r`nwelcomeDialogLastShownVersion=$welcomeVersion`r`n"
-if ($DisableMuseSoundsUpdateCheck) {
+if ($MuseSoundsUpdateTestMode) {
+    $iniContent += "[musesounds]`r`ncheckForUpdate=true`r`ncheckForUpdateTestMode=true`r`n"
+} elseif ($DisableMuseSoundsUpdateCheck) {
     $iniContent += "[musesounds]`r`ncheckForUpdate=false`r`n"
 }
 New-Item -ItemType Directory -Path $profilePlan.SettingsDirectory -Force | Out-Null
