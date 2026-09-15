@@ -78,10 +78,14 @@ public static class MuseDialogWindowProbe
 
 $WM_CLOSE = 0x0010
 $GW_OWNER = 4
+$monitorStartedAt = [DateTime]::UtcNow
+$logDirectory = Join-Path $env:LOCALAPPDATA 'MuseScore\MuseScoreStudio5Development\logs'
 $evidence = [ordered]@{
     expected_process = 'MuseScoreStudio5.exe'
     expected_control_script = 'TC_MuseSoundsUpdateTestModeControl.js'
-    selection_rule = 'single visible owned top-level window of exact control process'
+    selection_rule = 'single visible non-New-score owned top-level window after the MuseSounds release-dialog QML marker, from the exact control process'
+    dialog_log_marker_observed = $false
+    dialog_log_path = $null
     opened = $false
     settled = $false
     close_invoked = $false
@@ -105,6 +109,17 @@ try {
         $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'MuseScoreStudio5.exe'" |
             Where-Object { [string]$_.CommandLine -like '*TC_MuseSoundsUpdateTestModeControl.js*' })
 
+            $markerLog = @(Get-ChildItem -LiteralPath $logDirectory -Filter 'MuseScoreStudio_*.log' -File |
+                Where-Object { $_.LastWriteTimeUtc -ge $monitorStartedAt } |
+                Where-Object { Select-String -LiteralPath $_.FullName -SimpleMatch 'MuseSoundsReleaseInfoDialog.qml' -Quiet } |
+                Sort-Object LastWriteTimeUtc -Descending |
+                Select-Object -First 1)
+            if ($markerLog.Count -eq 0) {
+                continue
+            }
+            $evidence.dialog_log_marker_observed = $true
+            $evidence.dialog_log_path = $markerLog[0].FullName
+
         foreach ($process in $processes) {
             $windows = @([MuseDialogWindowProbe]::WindowsForProcess([uint32]$process.ProcessId) |
                 Where-Object { [MuseDialogWindowProbe]::IsWindowVisible($_) })
@@ -119,7 +134,8 @@ try {
             })
             $evidence.observed_windows = $observed
             $owned = @($windows | Where-Object {
-                [MuseDialogWindowProbe]::GetWindow($_, $GW_OWNER) -ne [IntPtr]::Zero
+                [MuseDialogWindowProbe]::GetWindow($_, $GW_OWNER) -ne [IntPtr]::Zero -and
+                [MuseDialogWindowProbe]::WindowText($_) -ne 'New score'
             })
             if ($owned.Count -eq 0) {
                 continue
