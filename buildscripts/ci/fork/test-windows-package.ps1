@@ -91,6 +91,9 @@ $script:OutputDrainSeconds = 10
 $script:TimeoutDiagnosticsSeconds = 30
 $script:TimeoutDiagnosticsMaxBytes = 256MB
 $script:ProcessSnapshotTimeoutSeconds = 5
+$script:TimeoutStackDiagnosticsSeconds = 30
+$script:TimeoutStackToolMaxSeconds = 5
+$script:TimeoutStackOutputMaxBytes = 2MB
 
 # Profile sandbox layout used for the POSIX fixture host and for the plan testability hook; a real
 # Windows run uses the known folders instead of this sandbox (see the first-run profile section).
@@ -769,6 +772,240 @@ function Save-ProcessSnapshot {
     }
 }
 
+function Find-TimeoutDiagnosticTool {
+    param([Parameter(Mandatory = $true)][string[]] $Names)
+
+    foreach ($name in $Names) {
+        try {
+            $command = Get-Command -Name $name -CommandType Application -ErrorAction Stop | Select-Object -First 1
+            if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace([string] $command.Source)) {
+                return [string] $command.Source
+            }
+        } catch {
+            # Tool availability is diagnostic evidence, not a reason to change the timeout result.
+        }
+    }
+    return $null
+}
+
+function Invoke-TimeoutDiagnosticTool {
+    param(
+        [Parameter(Mandatory = $true)][string] $Label,
+        [Parameter(Mandatory = $true)][string] $Executable,
+        [Parameter(Mandatory = $true)][string[]] $Arguments,
+        [Parameter(Mandatory = $true)][string] $OutputPath,
+        [Parameter(Mandatory = $true)][DateTime] $Deadline
+    )
+
+    $result = [ordered]@{
+        executable = $Executable
+        arguments = @($Arguments)
+        timed_out = $false
+        exit_code = $null
+        output = $OutputPath
+        error = $null
+    }
+
+    $remaining = ($Deadline - [DateTime]::UtcNow).TotalSeconds
+    if ($remaining -le 0) {
+        $result.error = 'stack capture deadline reached before the tool started'
+        return $result
+    }
+
+    $waitMilliseconds = [Math]::Max(
+        1000,
+        [Math]::Min(
+            $script:TimeoutStackToolMaxSeconds * 1000,
+            [int] ($remaining * 1000)))
+    $process = $null
+    $stdoutTask = $null
+    $stderrTask = $null
+    $stdout = ''
+    $stderr = ''
+    try {
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $Executable
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        foreach ($argument in $Arguments) {
+            $startInfo.ArgumentList.Add([string] $argument)
+        }
+
+        $process = [Diagnostics.Process]::new()
+        $process.StartInfo = $startInfo
+        $null = $process.Start()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($waitMilliseconds)) {
+            $result.timed_out = $true
+            try {
+                if (-not $process.HasExited) {
+                    $process.Kill($true)
+                }
+            } catch {
+                $result.error = "tool timeout kill failed: $($_.Exception.Message)"
+            }
+            try {
+                $null = $process.WaitForExit(2000)
+            } catch {
+                if ($null -eq $result.error) {
+                    $result.error = "tool timeout wait failed: $($_.Exception.Message)"
+                }
+            }
+        } else {
+            $result.exit_code = $process.ExitCode
+        }
+
+        if ($null -ne $stdoutTask -and $stdoutTask.Wait(1000)) {
+            $stdout = $stdoutTask.Result
+        }
+        if ($null -ne $stderrTask -and $stderrTask.Wait(1000)) {
+            $stderr = $stderrTask.Result
+        }
+    } catch {
+        $result.error = "tool launch failed: $($_.Exception.Message)"
+    } finally {
+        if ($null -ne $process) {
+            $process.Dispose()
+        }
+    }
+
+    $text = @(
+        "label: $Label"
+        "executable: $Executable"
+        "arguments: $($Arguments -join ' ')"
+        "timed_out: $($result.timed_out)"
+        "exit_code: $($result.exit_code)"
+        "error: $($result.error)"
+        '--- stdout ---'
+        $stdout
+        '--- stderr ---'
+        $stderr
+    ) -join [Environment]::NewLine
+    # UTF-8 can use four bytes per character; stay below the byte cap even when tool output is non-ASCII.
+    $maxCharacters = [Math]::Min($text.Length, [int] ($script:TimeoutStackOutputMaxBytes / 4))
+    try {
+        [IO.File]::WriteAllText(
+            $OutputPath,
+            $text.Substring(0, $maxCharacters),
+            [Text.UTF8Encoding]::new($false))
+    } catch {
+        $result.error = "tool output write failed: $($_.Exception.Message)"
+    }
+    return $result
+}
+
+function Capture-TimeoutStackDiagnostics {
+    <#
+        Captures bounded debugger output and a same-user Windows minidump before a timed-out
+        application is killed. This is evidence only: every failure here is written to the
+        diagnostic directory and never changes the original timeout result.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][int] $RootProcessId,
+        [Parameter(Mandatory = $true)][string] $OutputDirectory
+    )
+
+    $deadline = [DateTime]::UtcNow.AddSeconds($script:TimeoutStackDiagnosticsSeconds)
+    try {
+        New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+    } catch {
+        return
+    }
+
+    $candidates = [ordered]@{
+        cdb = @('cdb.exe', 'cdb')
+        windbg = @('windbg.exe', 'windbg')
+        procdump = @('procdump.exe', 'procdump64.exe', 'procdump')
+    }
+    $availability = [ordered]@{
+        captured_at_utc = [DateTime]::UtcNow.ToString('o')
+        root_process_id = $RootProcessId
+        tools = [ordered]@{}
+        captures = [ordered]@{}
+    }
+    foreach ($label in $candidates.Keys) {
+        $path = Find-TimeoutDiagnosticTool -Names $candidates[$label]
+        $availability.tools[$label] = [ordered]@{
+            found = ($null -ne $path)
+            path = $path
+        }
+    }
+
+    $availabilityPath = Join-Path $OutputDirectory 'tool-availability.json'
+    try {
+        [IO.File]::WriteAllText(
+            $availabilityPath,
+            ($availability | ConvertTo-Json -Depth 6),
+            [Text.UTF8Encoding]::new($false))
+    } catch {
+        # Continue to the independent dump attempt even if the probe record cannot be written.
+    }
+
+    foreach ($label in @('cdb', 'windbg')) {
+        $toolPath = $availability.tools[$label].path
+        if ([string]::IsNullOrWhiteSpace([string] $toolPath)) {
+            continue
+        }
+        $stackPath = Join-Path $OutputDirectory "$label-stack.txt"
+        $arguments = @('-p', [string] $RootProcessId, '-c', '~* kb; qd')
+        $availability.captures[$label] = Invoke-TimeoutDiagnosticTool `
+            -Label $label -Executable $toolPath -Arguments $arguments `
+            -OutputPath $stackPath -Deadline $deadline
+    }
+
+    $dumpPath = Join-Path $OutputDirectory 'comsvcs-minidump.dmp'
+    $systemRoot = [string] $env:SystemRoot
+    $rundll32 = if ([string]::IsNullOrWhiteSpace($systemRoot)) {
+        $null
+    } else {
+        Join-Path $systemRoot 'System32/rundll32.exe'
+    }
+    $comsvcs = if ([string]::IsNullOrWhiteSpace($systemRoot)) {
+        $null
+    } else {
+        Join-Path $systemRoot 'System32/comsvcs.dll'
+    }
+    if ($null -ne $rundll32 -and (Test-Path -LiteralPath $rundll32 -PathType Leaf) `
+            -and $null -ne $comsvcs -and (Test-Path -LiteralPath $comsvcs -PathType Leaf)) {
+        $arguments = @("$comsvcs,MiniDump", [string] $RootProcessId, $dumpPath, 'full')
+        $availability.captures.comsvcs = Invoke-TimeoutDiagnosticTool `
+            -Label 'comsvcs-minidump' -Executable $rundll32 -Arguments $arguments `
+            -OutputPath (Join-Path $OutputDirectory 'comsvcs-minidump.txt') -Deadline $deadline
+        if (Test-Path -LiteralPath $dumpPath -PathType Leaf) {
+            try {
+                $dumpBytes = [long] (Get-Item -LiteralPath $dumpPath -ErrorAction Stop).Length
+                $availability.captures.comsvcs.dump_bytes = $dumpBytes
+                if ($dumpBytes -gt $script:TimeoutDiagnosticsMaxBytes) {
+                    Remove-Item -LiteralPath $dumpPath -Force -ErrorAction SilentlyContinue
+                    $availability.captures.comsvcs.dump_rejected = `
+                        "dump exceeded the $($script:TimeoutDiagnosticsMaxBytes)-byte cap"
+                }
+            } catch {
+                $availability.captures.comsvcs.dump_error = $_.Exception.Message
+            }
+        } else {
+            $availability.captures.comsvcs.dump_missing = $true
+        }
+    } else {
+        $availability.captures.comsvcs = [ordered]@{
+            error = 'System32 rundll32.exe or comsvcs.dll was unavailable'
+        }
+    }
+
+    try {
+        [IO.File]::WriteAllText(
+            $availabilityPath,
+            ($availability | ConvertTo-Json -Depth 8),
+            [Text.UTF8Encoding]::new($false))
+    } catch {
+        # Diagnostics are best effort and must not replace the timeout result.
+    }
+}
+
+
 function Copy-TestflowTimeoutDiagnostics {
     <#
         Copies the evidence that is otherwise easy to lose when a testflow process is terminated.
@@ -1002,6 +1239,11 @@ function Invoke-BoundedProcess {
         if (-not [string]::IsNullOrWhiteSpace($ProcessSnapshotRoot)) {
             Save-ProcessSnapshot -RootProcessId $process.Id `
                 -Path (Join-Path $ProcessSnapshotRoot 'process-before-termination.json') | Out-Null
+            if ($script:IsWindowsHost) {
+                Write-Host '   capturing bounded debugger stacks and same-user minidump before termination'
+                Capture-TimeoutStackDiagnostics -RootProcessId $process.Id `
+                    -OutputDirectory (Join-Path $ProcessSnapshotRoot 'timeout-stacks')
+            }
         }
         Write-Host "   TIMEOUT after ${TimeoutSeconds}s; terminating the process tree"
         $terminationConfirmed = Stop-ProcessTree -Process $process

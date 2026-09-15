@@ -1161,6 +1161,14 @@ try {
             Assert-True ($result.ExitCode -ne 0) 'expected a nonzero exit for a hanging application'
             Assert-True ($result.Output -match 'timed out') "unexpected error text: $($result.Output)"
             Assert-True ($stopwatch.Elapsed.TotalSeconds -lt 60) "timeout handling took too long: $($stopwatch.Elapsed.TotalSeconds)s"
+            $runtimeReportPath = Join-Path $WorkRoot 'rt-hang-out/logs/runtime-tests.json'
+            Assert-True (Test-Path -LiteralPath $runtimeReportPath -PathType Leaf) `
+                'a timed-out GUI run must retain its runtime result record'
+            $runtimeReport = Get-Content -LiteralPath $runtimeReportPath -Raw | ConvertFrom-Json
+            $timedOutRecord = @($runtimeReport | Where-Object { $_.name -eq 'TC11_CommandPaletteDialog.js' })[0]
+            Assert-True ($null -ne $timedOutRecord) 'the timed-out GUI case must be recorded'
+            Assert-True ($timedOutRecord.timed_out -eq $true -and $timedOutRecord.ok -eq $false -and $null -eq $timedOutRecord.exit_code) `
+                'the original timeout must remain authoritative even when diagnostics are collected'
             $diagnosticRoot = Join-Path (Join-Path $WorkRoot 'rt-hang-out/logs/diagnostics') 'gui-TC11_CommandPaletteDialog'
             foreach ($requiredDiagnostic in @(
                     'stdout.log'
@@ -1179,6 +1187,10 @@ try {
                 'diagnostics must not copy the whole profile tree'
             Assert-True ($diagnosticManifest.collection_timed_out -eq $false) `
                 'bounded diagnostic collection must finish within its own deadline'
+            Assert-True ($diagnosticManifest.collection_elapsed_sec -ge 0 -and $diagnosticManifest.collection_elapsed_sec -lt 30) `
+                'bounded timeout diagnostics must finish within their collection deadline'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $diagnosticRoot 'timeout-stacks'))) `
+                'POSIX fixtures must not run Windows-only debugger/minidump capture'
         }
 
         Invoke-Case 'runtime: stub application passes version/export/GUI checks' {
@@ -1208,6 +1220,8 @@ try {
             Assert-True ($guiNames.Count -eq 2) "base source fixture must select exactly TC11/TC14, found: $($guiNames -join ', ')"
             Assert-True ($guiNames -notcontains $script:FeatureFixtureName) 'base source fixture must not select TC15'
             Assert-True (Test-Path -LiteralPath (Join-Path $WorkRoot 'rt-ok-out/logs/export-pdf.stdout.log')) 'PDF export output must be retained for diagnosis'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $WorkRoot 'rt-ok-out/logs/diagnostics'))) `
+                'timeout diagnostics must be timeout-only and absent after a successful run'
         }
 
         Invoke-Case 'runtime: output that never reaches end of stream fails instead of hanging' {
