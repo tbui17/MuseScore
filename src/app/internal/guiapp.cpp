@@ -198,23 +198,11 @@ void MuseScoreGuiApp::processTestflow(const muse::modularity::ContextPtr& ctxId)
 
     // execScript is synchronous: it runs the JS script to completion,
     // sets status to Finished/Error, and calls restoreAffectOnServices()
-    // before returning. Trace both status/step completion and the return
-    // boundary so a testflow process hang cannot be mistaken for a script
-    // failure.
-    muse::async::Channel<StepInfo, Ret> stepCh = testflow()->stepStatusChanged();
-    stepCh.onReceive(nullptr, [](const StepInfo& step, const Ret& ret) {
-        LOGI() << "GUI testflow step transition: " << step.name
-               << ", status: " << int(step.status)
-               << ", ret: " << ret.toString();
-    });
-    muse::async::Channel<muse::io::path_t, ITestflow::Status> statusCh = testflow()->statusChanged();
-    statusCh.onReceive(nullptr, [](const muse::io::path_t& path, ITestflow::Status st) {
-        LOGI() << "GUI testflow status transition: " << ITestflow::statusToString(st)
-               << ", path: " << path;
-    });
-    LOGI() << "GUI testflow processTestflow: execScript begin";
+    // before returning. We check the status after it returns.
+    // We intentionally do NOT subscribe to statusChanged/stepStatusChanged
+    // channels — those callbacks would outlive the Testflow singleton
+    // during context destruction, causing a use-after-free.
     testflow()->execScript(options->testflow.testCaseNameOrFile, opt);
-    LOGI() << "GUI testflow processTestflow: execScript returned";
 
     ITestflow::Status st = testflow()->status();
     int exitCode = (st == ITestflow::Status::Finished) ? 0 : 1;
@@ -237,8 +225,7 @@ void MuseScoreGuiApp::processTestflow(const muse::modularity::ContextPtr& ctxId)
     // restoreAffectOnServices(); the test result is determined, so skipping
     // static destruction is safe for a test runner.
     // Flush stdio buffers before _exit — _exit skips atexit/fflush, so
-    // log output is flushed explicitly below.
-    LOGI() << "GUI testflow processTestflow: about to _exit, code: " << exitCode;
+    // testflow output written to stdout/stderr would be lost without this.
     fflush(stdout);
     fflush(stderr);
     _exit(exitCode);
