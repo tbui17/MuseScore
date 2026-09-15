@@ -150,6 +150,7 @@ var testCase = {
             Home.goToHome()
             api.testflow.seeChanges(500)
             NewScore.openNewScoreDialog()
+            api.testflow.seeChanges(500)
             NewScore.selectTab("instruments")
             NewScore.chooseInstrument("Keyboards", "Piano")
             api.testflow.seeChanges()
