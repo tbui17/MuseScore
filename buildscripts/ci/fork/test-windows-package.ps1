@@ -59,7 +59,9 @@ param(
     # profile contract for the -OutputDirectory sandbox instead of running the package.
     [switch] $ExportProfilePlan,
     # Testability hook for the bounded timeout dump path and rundll32 argument contract.
-    [switch] $ExportTimeoutDumpPlan
+    [switch] $ExportTimeoutDumpPlan,
+    # Diagnostic-only profile delta. This does not alter package or source identity.
+    [switch] $DisableMuseSoundsUpdateCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -1929,6 +1931,9 @@ if ($manifestApplicationVersion -ne $welcomeVersion -and -not $manifestApplicati
     Fail "manifest application_version '$manifestApplicationVersion' does not match the source version '$welcomeVersion'"
 }
 $iniContent = "[application]`r`nhasCompletedFirstLaunchSetup=true`r`nwelcomeDialogShowOnStartup=false`r`nwelcomeDialogLastShownVersion=$welcomeVersion`r`n"
+if ($DisableMuseSoundsUpdateCheck) {
+    $iniContent += "[musesounds]`r`ncheckForUpdate=false`r`n"
+}
 New-Item -ItemType Directory -Path $profilePlan.SettingsDirectory -Force | Out-Null
 [IO.File]::WriteAllText($profilePlan.SettingsFilePath, $iniContent, [Text.UTF8Encoding]::new($false))
 Write-Host "seeded first-run settings in $($profilePlan.SettingsFilePath)"

@@ -23,6 +23,13 @@ on:
         description: Enable compatible Qt, dependency-archive and compiler-object caches on trusted runs
         type: boolean
         default: true
+      diagnostic_runtime_profile:
+        description: Runtime-only replay profile; never qualifies a source or release
+        type: choice
+        default: none
+        options:
+          - none
+          - musesounds-update-disabled
 
 permissions:
   contents: read
@@ -98,6 +105,7 @@ jobs:
           retention-days: 14
 
   windows:
+    if: inputs.diagnostic_runtime_profile != 'musesounds-update-disabled'
     needs: preflight
     runs-on: windows-2025
     timeout-minutes: 240
@@ -326,6 +334,7 @@ jobs:
           retention-days: 14
 
   units:
+    if: inputs.diagnostic_runtime_profile != 'musesounds-update-disabled'
     needs: preflight
     uses: ./.github/workflows/check_unit_tests.yml
     with:
@@ -333,6 +342,7 @@ jobs:
       code_coverage: false
 
   runtime:
+    if: inputs.diagnostic_runtime_profile != 'musesounds-update-disabled'
     needs: [preflight, windows]
     runs-on: windows-2025
     # Three GUI cases and four probes each have the helper's 600s bound; leave collection time after
@@ -384,11 +394,107 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  diagnostic_runtime:
+    if: >-
+      github.repository == 'tbui17/MuseScore' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.diagnostic_runtime_profile == 'musesounds-update-disabled'
+    needs: preflight
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          path: pipeline
+          sparse-checkout: buildscripts/ci/fork
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
+          path: fixtures
+          sparse-checkout: |
+            /version.cmake
+            /share/testflowscripts/TC11_CommandPaletteDialog.js
+            /share/testflowscripts/TC14_CommandPaletteAnnounce.js
+            /share/testflowscripts/TC15_RegionEntryAnnounce.js
+            /vtest/scores/layout-5.mscx
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Download exact package from diagnostic source run
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: 10405214616
+          github-token: ${{ github.token }}
+          repository: tbui17/MuseScore
+          run-id: 34989534823
+          path: package
+          merge-multiple: true
+      - name: Record isolated diagnostic harness delta
+        shell: pwsh
+        env:
+          EXPECTED_PACKAGE_SHA256: 6a0a16ca4d63cc79c6ef797b93820564875ae39085b20486e5b79c9449aaa4a9
+          EXPECTED_SOURCE_SHA: de6b09e5d0ca500eb413ef03862242d2a03decd8
+          EXPECTED_FRAMEWORK_SHA: 54b1ab3353365c1d84119c8e1cd450c2a9e7bf80
+        run: |
+          $manifest = Get-Content -LiteralPath package/build-manifest.json -Raw | ConvertFrom-Json
+          $zip = @(Get-ChildItem -LiteralPath package -Filter '*.zip' -File)
+          if ($zip.Count -ne 1) { throw "expected exactly one package zip, found $($zip.Count)" }
+          $packageSha = (Get-FileHash -LiteralPath $zip[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($packageSha -ne $env:EXPECTED_PACKAGE_SHA256) { throw "package SHA-256 mismatch: $packageSha" }
+          if ($manifest.package.sha256 -ne $env:EXPECTED_PACKAGE_SHA256) { throw "manifest package SHA-256 mismatch" }
+          if ($manifest.source_sha -ne $env:EXPECTED_SOURCE_SHA) { throw "manifest source SHA mismatch" }
+          if ($manifest.framework_sha -ne $env:EXPECTED_FRAMEWORK_SHA) { throw "manifest framework SHA mismatch" }
+          $tc15 = 'fixtures/share/testflowscripts/TC15_RegionEntryAnnounce.js'
+          [ordered]@{
+            diagnostic_only = $true
+            exact_source_qualification = $false
+            origin_run_id = '34989534823'
+            origin_artifact_id = '10405214616'
+            package_sha256 = $packageSha
+            source_sha = $manifest.source_sha
+            framework_sha = $manifest.framework_sha
+            workflow_sha = '${{ needs.preflight.outputs.workflow_sha }}'
+            tc15_sha256 = (Get-FileHash -LiteralPath $tc15 -Algorithm SHA256).Hash.ToLowerInvariant()
+            profile_delta = [ordered]@{
+              section = 'musesounds'
+              checkForUpdate = $false
+            }
+          } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath diagnostic-harness-delta.json -Encoding utf8NoBOM
+      - name: Replay package with MuseSounds update check disabled
+        shell: pwsh
+        env:
+          MUSE_EXPECTED_WORKFLOW_SHA: de6b09e5d0ca500eb413ef03862242d2a03decd8
+          MUSE_EXPECTED_FRAMEWORK_SHA: 54b1ab3353365c1d84119c8e1cd450c2a9e7bf80
+        run: >-
+          ./pipeline/buildscripts/ci/fork/test-windows-package.ps1
+          -ArtifactDirectory ./package
+          -SourceDirectory ./fixtures
+          -OutputDirectory './runtime results'
+          -DisableMuseSoundsUpdateCheck
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: diagnostic-runtime-disabled-update-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runtime results/logs
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: diagnostic-harness-delta-${{ github.run_id }}-${{ github.run_attempt }}
+          path: diagnostic-harness-delta.json
+          if-no-files-found: error
+          retention-days: 14
+
   readiness:
     name: Fork Windows readiness
     # Same fork guard as preflight: an upstream run must not gain a failing status from a
     # workflow whose jobs are all skipped there. Inside the fork it still runs on failure.
-    if: github.repository == 'tbui17/MuseScore' && always()
+    if: >-
+      github.repository == 'tbui17/MuseScore' &&
+      always() &&
+      inputs.diagnostic_runtime_profile != 'musesounds-update-disabled'
     needs: [preflight, windows, units, runtime]
     runs-on: ubuntu-latest
     steps:
