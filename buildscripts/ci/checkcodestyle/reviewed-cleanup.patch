@@ -1,0 +1,279 @@
+diff --git a/src/appshell/qml/MuseScore/AppShell/tests/commandpalettemodel_tests.cpp b/src/appshell/qml/MuseScore/AppShell/tests/commandpalettemodel_tests.cpp
+index 236b45fc02a39576e53b565e6d73ed302f1f24e1..4dcf184d37abc9ea7db25dc2f627133962194e58 100644
+--- a/src/appshell/qml/MuseScore/AppShell/tests/commandpalettemodel_tests.cpp
++++ b/src/appshell/qml/MuseScore/AppShell/tests/commandpalettemodel_tests.cpp
+@@ -52,12 +52,12 @@ TEST_F(CommandPaletteModelTests, RunSelected_DefersDispatch)
+ 
+     UiActionList actions = { action };
+     EXPECT_CALL(m_uiActionsRegisterMock, actionList())
+-        .WillOnce(Return(actions));
++    .WillOnce(Return(actions));
+     EXPECT_CALL(m_uiActionsRegisterMock, actionState(action.code))
+-        .WillOnce(Return(UiActionState::make_enabled()));
++    .WillOnce(Return(UiActionState::make_enabled()));
+ 
+     EXPECT_CALL(m_configMock, commandPaletteRecentActions())
+-        .WillOnce(Return(ActionCodeList()));
++    .WillOnce(Return(ActionCodeList()));
+ 
+     m_model.load();
+ 
+@@ -66,7 +66,7 @@ TEST_F(CommandPaletteModelTests, RunSelected_DefersDispatch)
+     // fail the test. The expectation retires immediately (Times(0) is vacuously
+     // satisfied), so the deferred call below won't match it.
+     EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
+-        .Times(0);
++    .Times(0);
+ 
+     m_model.setSelectedIndex(0);
+     bool result = m_model.runSelected();
+@@ -77,7 +77,7 @@ TEST_F(CommandPaletteModelTests, RunSelected_DefersDispatch)
+ 
+     // After processing deferred events, the QueuedConnection dispatch fires.
+     EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
+-        .Times(1);
++    .Times(1);
+ 
+     QTest::qWait(10);
+ }
+@@ -106,12 +106,12 @@ TEST_F(CommandPaletteModelTests, RunSelected_DispatchSurvivesModelDestruction)
+ 
+     UiActionList actions = { action };
+     EXPECT_CALL(m_uiActionsRegisterMock, actionList())
+-        .WillOnce(Return(actions));
++    .WillOnce(Return(actions));
+     EXPECT_CALL(m_uiActionsRegisterMock, actionState(action.code))
+-        .WillOnce(Return(UiActionState::make_enabled()));
++    .WillOnce(Return(UiActionState::make_enabled()));
+ 
+     EXPECT_CALL(m_configMock, commandPaletteRecentActions())
+-        .WillOnce(Return(ActionCodeList()));
++    .WillOnce(Return(ActionCodeList()));
+ 
+     // Heap-allocate the model so we can destroy it mid-flight, exactly
+     // like the dialog destroying its QML child. The mocks are injected
+@@ -128,7 +128,7 @@ TEST_F(CommandPaletteModelTests, RunSelected_DispatchSurvivesModelDestruction)
+     model->setSelectedIndex(0);
+ 
+     EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
+-        .Times(0);
++    .Times(0);
+     bool result = model->runSelected();
+     EXPECT_TRUE(result);
+     testing::Mock::VerifyAndClearExpectations(&m_dispatcherMock);
+@@ -140,7 +140,7 @@ TEST_F(CommandPaletteModelTests, RunSelected_DispatchSurvivesModelDestruction)
+ 
+     // The dispatch must still fire despite the model being gone.
+     EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
+-        .Times(1);
++    .Times(1);
+     QTest::qWait(10);
+ }
+ 
+diff --git a/src/braille/internal/brailleconfiguration.cpp b/src/braille/internal/brailleconfiguration.cpp
+index 620cf7693683e064462c3236561df3aed794615d..101b08d1f6098aa2ea60dfe0a2dc2a43d6112d0c 100644
+--- a/src/braille/internal/brailleconfiguration.cpp
++++ b/src/braille/internal/brailleconfiguration.cpp
+@@ -89,6 +89,7 @@ void BrailleConfiguration::setSixKeyInputEnabled(const bool enabled)
+ {
+     settings()->setSharedValue(BRAILLE_SIX_KEY_INPUT_ENABLED, Val(enabled));
+ }
++
+ muse::async::Notification BrailleConfiguration::advanceCursorAfterDotChanged() const
+ {
+     return m_advanceCursorAfterDotChanged;
+diff --git a/src/engraving/tests/textbase_tests.cpp b/src/engraving/tests/textbase_tests.cpp
+index 29ec9919ce21304c3aa2b8d990dfaecd08f5cdd1..3eff28887b8d6c6547183104ebefb02e205c02cc 100644
+--- a/src/engraving/tests/textbase_tests.cpp
++++ b/src/engraving/tests/textbase_tests.cpp
+@@ -283,8 +283,8 @@ TEST_F(Engraving_TextBaseTests, setTempoUpdatesExisting)
+     String existingXml = existing->xmlText();
+     static const std::regex bpmRegex(R"(\s*=\s*\d+([.]\d+)?)");
+     std::string replaced = std::regex_replace(existingXml.toStdString(), bpmRegex, " = 140");
+-   existing->EngravingObject::undoChangeProperty(Pid::TEXT, PropertyValue(String::fromStdString(replaced)));
+-   existing->EngravingObject::undoChangeProperty(Pid::TEMPO_FOLLOW_TEXT, PropertyValue(true));
++    existing->EngravingObject::undoChangeProperty(Pid::TEXT, PropertyValue(String::fromStdString(replaced)));
++    existing->EngravingObject::undoChangeProperty(Pid::TEMPO_FOLLOW_TEXT, PropertyValue(true));
+     if (!existing->followText()) {
+         existing->updateTempo();
+     }
+diff --git a/src/instrumentsscene/qml/MuseScore/InstrumentsScene/internal/instrumentsonscorelistmodel.cpp b/src/instrumentsscene/qml/MuseScore/InstrumentsScene/internal/instrumentsonscorelistmodel.cpp
+index b0faef0601c74e7f7530b19efe8a7e3fb831a153..0cf3ff452af4c189a0e5d867f0a3c350865b6b73 100644
+--- a/src/instrumentsscene/qml/MuseScore/InstrumentsScene/internal/instrumentsonscorelistmodel.cpp
++++ b/src/instrumentsscene/qml/MuseScore/InstrumentsScene/internal/instrumentsonscorelistmodel.cpp
+@@ -237,10 +237,10 @@ void InstrumentsOnScoreListModel::addInstruments(const QStringList& instrumentId
+ 
+         if (totalCount == 1) {
+             announcement = muse::qtrc("instruments", "%1 added, 1 instrument in score")
+-                               .arg(namesStr);
++                           .arg(namesStr);
+         } else {
+             announcement = muse::qtrc("instruments", "%1 added, %n instruments in score", "", totalCount)
+-                               .arg(namesStr);
++                           .arg(namesStr);
+         }
+ 
+         accessibilityController()->announce(announcement);
+@@ -267,13 +267,13 @@ void InstrumentsOnScoreListModel::removeSelectionWithAnnouncement()
+ 
+         if (remainingCount == 0) {
+             announcement = muse::qtrc("instruments", "%1 removed, score has no instruments")
+-                               .arg(namesStr);
++                           .arg(namesStr);
+         } else if (remainingCount == 1) {
+             announcement = muse::qtrc("instruments", "%1 removed, 1 instrument in score")
+-                               .arg(namesStr);
++                           .arg(namesStr);
+         } else {
+             announcement = muse::qtrc("instruments", "%1 removed, %n instruments in score", "", remainingCount)
+-                               .arg(namesStr);
++                           .arg(namesStr);
+         }
+ 
+         accessibilityController()->announce(announcement);
+diff --git a/src/notation/internal/notationinteraction.cpp b/src/notation/internal/notationinteraction.cpp
+index 46326ad10e546393ee37cf513800cfa7fe4775e8..d0b1070aca29a1814ee5493e665b72578e636ecc 100644
+--- a/src/notation/internal/notationinteraction.cpp
++++ b/src/notation/internal/notationinteraction.cpp
+@@ -6364,13 +6364,13 @@ bool NotationInteraction::setTempoAtCurrentPosition(int bpm)
+ 
+     // Check for an existing TempoText on this segment (tempo text is always track 0)
+     TempoText* existingTempo = segment
+-        ? toTempoText(segment->findAnnotation(ElementType::TEMPO_TEXT, 0, 0))
+-        : nullptr;
++                               ? toTempoText(segment->findAnnotation(ElementType::TEMPO_TEXT, 0, 0))
++                               : nullptr;
+ 
+     if (existingTempo) {
+         // Update existing tempo text's BPM instead of creating a duplicate
+         String xmlText = existingTempo->xmlText();
+-       static const std::regex bpmRegex(R"(\s*=\s*\d+([.]\d+)?)");
++        static const std::regex bpmRegex(R"(\s*=\s*\d+([.]\d+)?)");
+         std::string replaced = std::regex_replace(xmlText.toStdString(), bpmRegex,
+                                                   " = " + std::to_string(bpm));
+         // undoChangeProperty 2-arg form is public on EngravingObject; the 3-arg override
+@@ -6380,9 +6380,9 @@ bool NotationInteraction::setTempoAtCurrentPosition(int bpm)
+         if (!existingTempo->followText()) {
+             existingTempo->updateTempo();
+         }
+-       apply();
++        apply();
+         showItem(existingTempo);
+-       return true;
++        return true;
+     }
+ 
+     TextBase* text = score()->addText(TextStyleType::TEMPO, item);
+diff --git a/src/notation/internal/notationnoteinput.cpp b/src/notation/internal/notationnoteinput.cpp
+index e9fa95259897371ac9d3b9dacee0edd3f1176d1f..2f49358da05a934034b8e2bbd54d61843d3e1e0e 100644
+--- a/src/notation/internal/notationnoteinput.cpp
++++ b/src/notation/internal/notationnoteinput.cpp
+@@ -961,6 +961,7 @@ void NotationNoteInput::notifyAboutStateChanged()
+ {
+     m_stateChanged.notify();
+ }
++
+ void NotationNoteInput::advanceCursor()
+ {
+     score()->inputState().moveToNextInputPos();
+diff --git a/src/notationscene/internal/notationactioncontroller.cpp b/src/notationscene/internal/notationactioncontroller.cpp
+index fde7a5a02f127be151377a31c44f3ffdce811d41..acc79332076828eb34273464483e1df260c3b8cc 100644
+--- a/src/notationscene/internal/notationactioncontroller.cpp
++++ b/src/notationscene/internal/notationactioncontroller.cpp
+@@ -1898,7 +1898,8 @@ EngravingItem* NotationActionController::tempoTargetItem() const
+     const INotationSelectionPtr sel = interaction->selection();
+     if (sel && sel->isRange()) {
+         const INotationSelectionRangePtr range = sel->range();
+-        return range && range->rangeStartSegment() ? range->rangeStartSegment()->firstElementForNavigation(range->startStaffIndex()) : nullptr;
++        return range
++               && range->rangeStartSegment() ? range->rangeStartSegment()->firstElementForNavigation(range->startStaffIndex()) : nullptr;
+     }
+ 
+     return interaction->contextItem();
+@@ -1930,6 +1931,7 @@ bool NotationActionController::currentTempoTick(Fraction& tick) const
+     tick = item->tick();
+     return true;
+ }
++
+ int NotationActionController::currentTempoBpm() const
+ {
+     mu::engraving::Score* score = currentNotationScore();
+diff --git a/src/notationscene/qml/MuseScore/NotationScene/tests/notationviewinputcontroller_tests.cpp b/src/notationscene/qml/MuseScore/NotationScene/tests/notationviewinputcontroller_tests.cpp
+index 54b05459c51c6a2852c0a055234fb9982fb0e96c..e1c5db0a558f1b75de97266385e8ee8113a53e7d 100644
+--- a/src/notationscene/qml/MuseScore/NotationScene/tests/notationviewinputcontroller_tests.cpp
++++ b/src/notationscene/qml/MuseScore/NotationScene/tests/notationviewinputcontroller_tests.cpp
+@@ -1467,17 +1467,17 @@ TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ClearInputBuffer_Cle
+ TEST_F(NotationViewInputControllerTests, BrailleConfigurationMock_AdvanceCursorAfterDot_DefaultsToFalse)
+ {
+     EXPECT_CALL(*m_brailleConfiguration, advanceCursorAfterDot())
+-        .WillOnce(Return(false));
++    .WillOnce(Return(false));
+     EXPECT_FALSE(m_brailleConfiguration->advanceCursorAfterDot());
+ }
+- 
++
+ TEST_F(NotationViewInputControllerTests, BrailleConfigurationMock_AdvanceCursorAfterDot_CanBeEnabled)
+ {
+     EXPECT_CALL(*m_brailleConfiguration, advanceCursorAfterDot())
+-        .WillOnce(Return(true));
++    .WillOnce(Return(true));
+     EXPECT_TRUE(m_brailleConfiguration->advanceCursorAfterDot());
+ }
+- 
++
+ TEST_F(NotationViewInputControllerTests, NotationNoteInputMock_AdvanceCursor_IsCallable)
+ {
+     EXPECT_CALL(*m_noteInput, advanceCursor()).Times(1);
+diff --git a/src/playback/internal/playbackuiactions.cpp b/src/playback/internal/playbackuiactions.cpp
+index d456ca84ea064aeab2f49d064ce8f9e04b458ff0..4fc854014350b9d25f725e9c140615f9c7836382 100644
+--- a/src/playback/internal/playbackuiactions.cpp
++++ b/src/playback/internal/playbackuiactions.cpp
+@@ -116,7 +116,7 @@ const UiActionList PlaybackUiActions::s_mainActions = {
+              TranslatableString("action", "Playback setup"),
+              TranslatableString("action", "Open playback setup dialog"),
+              IconCode::Code::NONE
+-            ),
++             ),
+     UiAction("playback-speed",
+              mu::context::UiCtxProjectOpened,
+              mu::context::CTX_NOTATION_OPENED,
+diff --git a/src/playback/playbackmodule.cpp b/src/playback/playbackmodule.cpp
+index 08871b93f44a3bf0f98e1b9d02911dbb712e4de2..a6b022b2dcb1efafc1a8521b03b382e93429d171 100644
+--- a/src/playback/playbackmodule.cpp
++++ b/src/playback/playbackmodule.cpp
+@@ -56,7 +56,7 @@ void PlaybackModule::resolveImports()
+     auto ir = globalIoc()->resolve<muse::interactive::IInteractiveUriRegister>(mname);
+     if (ir) {
+         ir->registerQmlUri(Uri("musescore://playback/soundprofilesdialog"), "MuseScore.Playback", "SoundProfilesDialog");
+-       ir->registerQmlUri(Uri("musescore://playback/speed"), "MuseScore.Playback", "PlaybackSpeedDialog");
++        ir->registerQmlUri(Uri("musescore://playback/speed"), "MuseScore.Playback", "PlaybackSpeedDialog");
+     }
+ }
+ 
+diff --git a/src/preferences/qml/MuseScore/Preferences/braillepreferencesmodel.cpp b/src/preferences/qml/MuseScore/Preferences/braillepreferencesmodel.cpp
+index 36d6aae0b01d480826dbc4c6a1d54ce3933c0ebf..4bdaee7a4b90a0c1feab643354157bc1e4314498 100644
+--- a/src/preferences/qml/MuseScore/Preferences/braillepreferencesmodel.cpp
++++ b/src/preferences/qml/MuseScore/Preferences/braillepreferencesmodel.cpp
+@@ -66,6 +66,7 @@ int BraillePreferencesModel::intervalDirection() const
+ {
+     return static_cast<int>(brailleConfiguration()->intervalDirection());
+ }
++
+ bool BraillePreferencesModel::advanceCursorAfterDot() const
+ {
+     return brailleConfiguration()->advanceCursorAfterDot();
+@@ -126,12 +127,13 @@ void BraillePreferencesModel::setIntervalDirection(int direction)
+     brailleConfiguration()->setIntervalDirection(static_cast<BrailleIntervalDirection>(direction));
+     emit intervalDirectionChanged(direction);
+ }
++
+ void BraillePreferencesModel::setAdvanceCursorAfterDot(bool value)
+ {
+     if (value == advanceCursorAfterDot()) {
+         return;
+     }
+- 
++
+     brailleConfiguration()->setAdvanceCursorAfterDot(value);
+     emit advanceCursorAfterDotChanged(value);
+ }

@@ -1,0 +1,122 @@
+name: 'Maintenance: Apply reviewed cleanup to PR 34'
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  apply_reviewed_cleanup:
+    if: >-
+      github.repository == 'tbui17/MuseScore' &&
+      github.actor == 'tbui17' &&
+      github.event.pull_request.number == 34 &&
+      github.event.pull_request.head.repo.full_name == 'tbui17/MuseScore' &&
+      github.event.pull_request.head.ref == 'fix/codestyle-diagnostics-and-cleanup'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Apply only the reviewed exact formatter patch
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import subprocess
+
+
+          def git(*args):
+              return subprocess.run(["git", *args], check=True, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, timeout=60).stdout
+
+
+          def blob(data):
+              return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+
+
+          APPROVED = {'src/appshell/qml/MuseScore/AppShell/tests/commandpalettemodel_tests.cpp': ['236b45fc02a39576e53b565e6d73ed302f1f24e1', '4dcf184d37abc9ea7db25dc2f627133962194e58'], 'src/braille/internal/brailleconfiguration.cpp': ['620cf7693683e064462c3236561df3aed794615d', '101b08d1f6098aa2ea60dfe0a2dc2a43d6112d0c'], 'src/engraving/tests/textbase_tests.cpp': ['29ec9919ce21304c3aa2b8d990dfaecd08f5cdd1', '3eff28887b8d6c6547183104ebefb02e205c02cc'], 'src/instrumentsscene/qml/MuseScore/InstrumentsScene/internal/instrumentsonscorelistmodel.cpp': ['b0faef0601c74e7f7530b19efe8a7e3fb831a153', '0cf3ff452af4c189a0e5d867f0a3c350865b6b73'], 'src/notation/internal/notationinteraction.cpp': ['46326ad10e546393ee37cf513800cfa7fe4775e8', 'd0b1070aca29a1814ee5493e665b72578e636ecc'], 'src/notation/internal/notationnoteinput.cpp': ['e9fa95259897371ac9d3b9dacee0edd3f1176d1f', '2f49358da05a934034b8e2bbd54d61843d3e1e0e'], 'src/notationscene/internal/notationactioncontroller.cpp': ['fde7a5a02f127be151377a31c44f3ffdce811d41', 'acc79332076828eb34273464483e1df260c3b8cc'], 'src/notationscene/qml/MuseScore/NotationScene/tests/notationviewinputcontroller_tests.cpp': ['54b05459c51c6a2852c0a055234fb9982fb0e96c', 'e1c5db0a558f1b75de97266385e8ee8113a53e7d'], 'src/playback/internal/playbackuiactions.cpp': ['d456ca84ea064aeab2f49d064ce8f9e04b458ff0', '4fc854014350b9d25f725e9c140615f9c7836382'], 'src/playback/playbackmodule.cpp': ['08871b93f44a3bf0f98e1b9d02911dbb712e4de2', 'a6b022b2dcb1efafc1a8521b03b382e93429d171'], 'src/preferences/qml/MuseScore/Preferences/braillepreferencesmodel.cpp': ['36d6aae0b01d480826dbc4c6a1d54ce3933c0ebf', '4bdaee7a4b90a0c1feab643354157bc1e4314498']}
+          PATCH_SHA = "56748614008536cb7a7daa668286a87db4f96d87599243f4dd4bcf1450cb3e9d"
+          PATCH_PATH = Path("buildscripts/ci/checkcodestyle/reviewed-cleanup.patch")
+
+
+          def apply():
+              head = git("rev-parse", "HEAD").decode().strip()
+              if head != os.environ["EXPECTED_HEAD"]:
+                  raise ValueError("Checkout is not the expected PR head")
+              git("diff", "--quiet", "HEAD", "--")
+              payload = PATCH_PATH.read_bytes()
+              if hashlib.sha256(payload).hexdigest() != PATCH_SHA:
+                  raise ValueError("Reviewed patch checksum mismatch")
+              existing = {name: git("rev-parse", "HEAD:" + name).decode().strip() for name in APPROVED}
+              if all(existing[name] == ids[1] for name, ids in APPROVED.items()):
+                  print("Reviewed cleanup is already applied")
+                  return
+              if any(existing[name] != ids[0] for name, ids in APPROVED.items()):
+                  raise ValueError("Source differs from the reviewed before-images")
+              git("apply", "--check", "--whitespace=error-all", str(PATCH_PATH))
+              git("apply", "--whitespace=error-all", str(PATCH_PATH))
+              changed = set(git("diff", "--name-only", "-z", "HEAD").decode().strip("\0").split("\0"))
+              if changed != set(APPROVED):
+                  raise ValueError("Patch changed an unapproved path")
+              for name, ids in APPROVED.items():
+                  path = Path(name)
+                  if path.is_symlink() or not path.is_file():
+                      raise ValueError("Expected a regular source file")
+                  before = git("show", "HEAD:" + name)
+                  after = path.read_bytes()
+                  if blob(after) != ids[1] or b"".join(before.split()) != b"".join(after.split()):
+                      raise ValueError("Output differs from the reviewed whitespace-only after-image")
+              git("add", "--", *APPROVED)
+              git("diff", "--cached", "--check")
+              print("Verified and staged all eleven reviewed source files")
+
+
+          if __name__ == "__main__":
+              apply()
+          PY
+      - name: Commit to the existing PR branch only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import os
+          import subprocess
+
+          def git(*args, env=None):
+              return subprocess.run(["git", *args], check=True, text=True,
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                  stdin=subprocess.DEVNULL, timeout=60, env=env).stdout.strip()
+
+          status = subprocess.run(["git", "diff", "--cached", "--quiet"], check=False, timeout=30).returncode
+          if status == 0:
+              raise SystemExit(0)
+          if status != 1:
+              raise RuntimeError("Cannot inspect the staged diff")
+          git("config", "user.name", "github-actions[bot]")
+          git("config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
+          git("-c", "core.hooksPath=/dev/null", "commit", "-m",
+              "Apply eleven reviewed formatter-only source corrections\n\nExact before/after Git blobs and patch SHA-256 validated. Refs #29.")
+          if git("rev-parse", "HEAD^") != os.environ["EXPECTED_HEAD"]:
+              raise RuntimeError("Unexpected commit parent")
+          environment = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+          token = environment.pop("GH_TOKEN")
+          authorization = base64.b64encode(("x-access-token:" + token).encode()).decode()
+          environment.update(GIT_CONFIG_COUNT="1",
+              GIT_CONFIG_KEY_0="http.https://github.com/.extraheader",
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic " + authorization)
+          git("push", "https://github.com/tbui17/MuseScore.git",
+              "HEAD:refs/heads/fix/codestyle-diagnostics-and-cleanup", env=environment)
+          print("Published reviewed cleanup commit " + git("rev-parse", "HEAD"))
+          PY
