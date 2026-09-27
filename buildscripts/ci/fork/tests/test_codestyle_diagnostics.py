@@ -131,6 +131,30 @@ class CodestyleDiagnosticsTests(unittest.TestCase):
                 self.collect()
         self.assertFalse(self.output.exists())
 
+    def test_second_pass_out_of_scope_changes_are_rejected(self):
+        self.collect()
+        (self.repo / "outside.txt").write_text("changed after evidence capture")
+        with self.assertRaisesRegex(ValueError, "changed again"):
+            diag.verify_stable(self.repo, "src", self.output)
+        self.assertFalse((self.output / "idempotence.txt").exists())
+
+    def test_second_pass_new_staged_out_of_scope_file_is_rejected(self):
+        self.collect()
+        (self.repo / "new-outside.txt").write_text("unapproved tracked change")
+        self.git("add", "new-outside.txt")
+        with self.assertRaisesRegex(ValueError, "changed again"):
+            diag.verify_stable(self.repo, "src", self.output)
+        self.assertFalse((self.output / "idempotence.txt").exists())
+
+    def test_failed_reverification_removes_stale_success_marker(self):
+        self.collect()
+        diag.verify_stable(self.repo, "src", self.output)
+        self.assertTrue((self.output / "idempotence.txt").exists())
+        self.source.write_bytes(self.formatted)
+        with self.assertRaisesRegex(ValueError, "changed again"):
+            diag.verify_stable(self.repo, "src", self.output)
+        self.assertFalse((self.output / "idempotence.txt").exists())
+
     def test_existing_evidence_is_never_overwritten(self):
         self.collect()
         original = (self.output / "manifest.json").read_bytes()

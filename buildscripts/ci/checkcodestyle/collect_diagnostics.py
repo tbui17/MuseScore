@@ -82,15 +82,19 @@ def collect(repository: Path, scope: str, output: Path) -> None:
 
 
 def verify_stable(repository: Path, scope: str, output: Path) -> None:
+    marker = output / "idempotence.txt"
+    marker.unlink(missing_ok=True)  # A failed recheck must not retain an earlier success claim.
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
     previous = (output / "changes.patch").read_bytes()
     if (manifest["scope"] != scope
             or manifest["source_sha"] != git(repository, "rev-parse", "HEAD").decode().strip()
             or manifest["patch_sha256"] != digest(previous)):
         raise ValueError("Formatter evidence identity mismatch")
-    if patch(repository, scope) != previous:
+    # Compare every tracked path: a second-pass change outside the requested scope
+    # must not disappear merely because the original patch was scope-filtered.
+    if patch(repository, ".") != previous:
         raise ValueError("Formatting changed again on the second pass")
-    (output / "idempotence.txt").write_text("Second formatting pass produced the identical patch.\n", encoding="utf-8")
+    marker.write_text("Second formatting pass produced the identical patch.\n", encoding="utf-8")
 
 
 def main() -> None:
