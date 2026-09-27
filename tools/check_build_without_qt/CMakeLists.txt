@@ -39,6 +39,10 @@ include_directories(
 set(MUSE_QT_SUPPORT OFF)
 include(${MUSE_FRAMEWORK_SRC_PATH}/cmake/MuseSetupConfiguration.cmake)
 
+# Standalone builds do not run the application's dependency manifest. Load the
+# pinned global-module dependency closure before creating any consuming targets.
+include(${CMAKE_CURRENT_LIST_DIR}/SetupDependencies.cmake)
+
 set(GLOBAL_NO_INTERNAL ON)
 add_subdirectory(${MUSE_FRAMEWORK_SRC_PATH}/global global)
 
