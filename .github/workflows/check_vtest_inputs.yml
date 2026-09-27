@@ -1,0 +1,38 @@
+name: 'Check: Visual test inputs'
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/check_visual_tests.yml'
+      - '.github/workflows/check_vtest_inputs.yml'
+      - 'buildscripts/ci/vtests/resolve_comparison.py'
+      - 'buildscripts/ci/fork/tests/test_vtest_comparison_inputs.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight_contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Exercise immutable comparison inputs and workflow wiring
+        run: |
+          python3 - <<'PY'
+          import sys
+          import unittest
+
+          suite = unittest.defaultTestLoader.discover(
+              "buildscripts/ci/fork/tests", pattern="test_vtest_comparison_inputs.py")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.testsRun == 0 or result.skipped or not result.wasSuccessful():
+              sys.exit(1)
+          PY
