@@ -4,24 +4,81 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   codestyle:
     runs-on: ubuntu-slim
+    timeout-minutes: 15
     steps:
     - name: Clone repository
+      id: checkout
       uses: actions/checkout@v6
       with:
+        persist-credentials: false
         submodules: recursive
 
-    - name: Install CMake
+    - name: Install CMake and Python
+      id: tools
       run: |
         sudo apt update
-        sudo apt install -y cmake
-        
-    - name: Test MSS coding style
-      run: |
-        cmake -P ./muse/buildscripts/ci/checkcodestyle/checkcodestyle.cmake ./src/
+        sudo apt install -y cmake python3
+        mkdir -p build.artifacts/codestyle
 
-    - name: Test MF coding style
+    - name: Test diagnostics collector
+      run: python3 -m unittest discover -s buildscripts/ci/fork/tests -p test_codestyle_diagnostics.py -v
+
+    - name: Test MSS coding style
+      id: application
+      shell: bash
       run: |
-        cmake -P ./muse/buildscripts/ci/checkcodestyle/checkcodestyle.cmake ./muse/framework/  
+        cmake -P ./muse/buildscripts/ci/checkcodestyle/checkcodestyle.cmake ./src/ \
+          2>&1 | tee build.artifacts/codestyle/application.log
+
+    # A failure in the application must not hide framework diagnostics. Run Git
+    # from the framework repository so application changes cannot contaminate it.
+    - name: Test MF coding style
+      id: framework
+      if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+      working-directory: muse
+      shell: bash
+      run: |
+        cmake -P ./buildscripts/ci/checkcodestyle/checkcodestyle.cmake ./framework/ \
+          2>&1 | tee ../build.artifacts/codestyle/framework.log
+
+    - name: Preserve exact formatter patches and source identities
+      id: evidence
+      if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+      shell: bash
+      run: |
+        python3 buildscripts/ci/checkcodestyle/collect_diagnostics.py collect \
+          --repository . --scope src --output build.artifacts/codestyle/application
+        python3 buildscripts/ci/checkcodestyle/collect_diagnostics.py collect \
+          --repository muse --scope framework --output build.artifacts/codestyle/framework
+
+    - name: Verify second-pass formatting stability
+      if: ${{ !cancelled() && steps.evidence.outcome == 'success' }}
+      shell: bash
+      run: |
+        cmake -P ./muse/tools/codestyle/format_dir.cmake ./src/ \
+          > build.artifacts/codestyle/application-repeat.log 2>&1
+        python3 buildscripts/ci/checkcodestyle/collect_diagnostics.py verify-stable \
+          --repository . --scope src --output build.artifacts/codestyle/application
+        (cd muse && cmake -P ./tools/codestyle/format_dir.cmake ./framework/) \
+          > build.artifacts/codestyle/framework-repeat.log 2>&1
+        python3 buildscripts/ci/checkcodestyle/collect_diagnostics.py verify-stable \
+          --repository muse --scope framework --output build.artifacts/codestyle/framework
+
+    - name: Upload codestyle diagnostics
+      if: ${{ always() && steps.checkout.outcome == 'success' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: codestyle-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        path: build.artifacts/codestyle/
+        if-no-files-found: warn
+        retention-days: 14
