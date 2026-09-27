@@ -20,7 +20,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 echo "Build Linux MuseScore AppImage"
 
-#set -x
+set -Ee
 trap 'echo Build failed; exit 1' ERR
 
 df -h .
@@ -33,11 +33,20 @@ BUILD_MODE=""
 SUFFIX="" # appended to `mscore` command name to avoid conflicts (e.g. `mscoredev`)
 BUILD_CRASHPAD_CLIENT="OFF"
 BUILD_PIPEWIRE=OFF
+PACKARCH=${PACKARCH:-x86_64}
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
+        -n|--number|--crash_log_url|--build_mode|--arch)
+            if [ "$#" -lt 2 ] || [[ "$2" == -* ]]; then
+                echo "error: missing value for $1" >&2
+                exit 1
+            fi
+            ;;
+    esac
+    case $1 in
         -n|--number) BUILD_NUMBER="$2"; shift ;;
-        --crash_log_url) CRASH_REPORT_URL="$2"; BUILD_CRASHPAD_CLIENT=ON; shift ;;
+        --crash_log_url) CRASH_REPORT_URL="$2"; shift ;;
         --build_mode) BUILD_MODE="$2"; shift ;;
         --arch) PACKARCH="$2"; shift ;;
         --build-pipewire) BUILD_PIPEWIRE=ON ;;
@@ -46,8 +55,19 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-if [ -z "$BUILD_NUMBER" ]; then echo "error: not set BUILD_NUMBER"; exit 1; fi
-if [ -z "$BUILD_MODE" ]; then BUILD_MODE=$(cat $ARTIFACTS_DIR/env/build_mode.env); fi
+# Legacy workflows pass literal quote characters as the empty-URL sentinel.
+# Quotes produced by variable expansion are data, not shell syntax. Derive the
+# feature flag from the final value, so repeated options also obey last-value wins.
+case "$CRASH_REPORT_URL" in
+    ""|"''"|'""') CRASH_REPORT_URL=""; BUILD_CRASHPAD_CLIENT=OFF ;;
+    *) BUILD_CRASHPAD_CLIENT=ON ;;
+esac
+
+if [[ ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "error: BUILD_NUMBER must be a nonempty decimal number" >&2
+    exit 1
+fi
+if [ -z "$BUILD_MODE" ]; then BUILD_MODE=$(cat "$ARTIFACTS_DIR/env/build_mode.env"); fi
 
 MUSE_APP_BUILD_MODE=dev
 
@@ -56,17 +76,18 @@ case "${BUILD_MODE}" in
 "nightly") MUSE_APP_BUILD_MODE=dev; SUFFIX=nightly;;
 "testing") MUSE_APP_BUILD_MODE=testing; SUFFIX=testing;;
 "stable")  MUSE_APP_BUILD_MODE=release; SUFFIX="";;
+*) echo "error: unknown BUILD_MODE" >&2; exit 1;;
 esac
 
 echo "MUSE_APP_BUILD_MODE: $MUSE_APP_BUILD_MODE"
 echo "BUILD_NUMBER: $BUILD_NUMBER"
-echo "CRASH_REPORT_URL: $CRASH_REPORT_URL"
+echo "BUILD_CRASHPAD_CLIENT: $BUILD_CRASHPAD_CLIENT"
 echo "BUILD_MODE: $BUILD_MODE"
 
 echo "=== ENVIRONMENT === "
 
-cat $BUILD_TOOLS/environment.sh
-source $BUILD_TOOLS/environment.sh
+cat "$BUILD_TOOLS/environment.sh"
+source "$BUILD_TOOLS/environment.sh"
 
 # disable update module due to current broken functionality
 if [ "$PACKARCH" == "aarch64" ]; then
@@ -91,9 +112,9 @@ MUSESCORE_BUILD_PIPEWIRE_AUDIO_DRIVER=$BUILD_PIPEWIRE \
 bash ./ninja_build.sh -t appimage
 
 
-bash ./buildscripts/ci/tools/make_release_channel_env.sh -c $MUSE_APP_BUILD_MODE
-bash ./buildscripts/ci/tools/make_version_env.sh $BUILD_NUMBER
-bash ./buildscripts/ci/tools/make_revision_env.sh $MUSESCORE_REVISION
+bash ./buildscripts/ci/tools/make_release_channel_env.sh -c "$MUSE_APP_BUILD_MODE"
+bash ./buildscripts/ci/tools/make_version_env.sh "$BUILD_NUMBER"
+bash ./buildscripts/ci/tools/make_revision_env.sh "$MUSESCORE_REVISION"
 bash ./buildscripts/ci/tools/make_branch_env.sh
 
 df -h .
