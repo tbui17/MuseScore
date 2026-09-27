@@ -66,6 +66,7 @@ int BraillePreferencesModel::intervalDirection() const
 {
     return static_cast<int>(brailleConfiguration()->intervalDirection());
 }
+
 bool BraillePreferencesModel::advanceCursorAfterDot() const
 {
     return brailleConfiguration()->advanceCursorAfterDot();
@@ -126,12 +127,13 @@ void BraillePreferencesModel::setIntervalDirection(int direction)
     brailleConfiguration()->setIntervalDirection(static_cast<BrailleIntervalDirection>(direction));
     emit intervalDirectionChanged(direction);
 }
+
 void BraillePreferencesModel::setAdvanceCursorAfterDot(bool value)
 {
     if (value == advanceCursorAfterDot()) {
         return;
     }
- 
+
     brailleConfiguration()->setAdvanceCursorAfterDot(value);
     emit advanceCursorAfterDotChanged(value);
 }

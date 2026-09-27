@@ -283,8 +283,8 @@ TEST_F(Engraving_TextBaseTests, setTempoUpdatesExisting)
     String existingXml = existing->xmlText();
     static const std::regex bpmRegex(R"(\s*=\s*\d+([.]\d+)?)");
     std::string replaced = std::regex_replace(existingXml.toStdString(), bpmRegex, " = 140");
-   existing->EngravingObject::undoChangeProperty(Pid::TEXT, PropertyValue(String::fromStdString(replaced)));
-   existing->EngravingObject::undoChangeProperty(Pid::TEMPO_FOLLOW_TEXT, PropertyValue(true));
+    existing->EngravingObject::undoChangeProperty(Pid::TEXT, PropertyValue(String::fromStdString(replaced)));
+    existing->EngravingObject::undoChangeProperty(Pid::TEMPO_FOLLOW_TEXT, PropertyValue(true));
     if (!existing->followText()) {
         existing->updateTempo();
     }

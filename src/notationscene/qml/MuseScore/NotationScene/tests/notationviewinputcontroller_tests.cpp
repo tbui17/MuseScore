@@ -1467,17 +1467,17 @@ TEST_F(NotationViewInputControllerTests, BrailleSixKeyInput_ClearInputBuffer_Cle
 TEST_F(NotationViewInputControllerTests, BrailleConfigurationMock_AdvanceCursorAfterDot_DefaultsToFalse)
 {
     EXPECT_CALL(*m_brailleConfiguration, advanceCursorAfterDot())
-        .WillOnce(Return(false));
+    .WillOnce(Return(false));
     EXPECT_FALSE(m_brailleConfiguration->advanceCursorAfterDot());
 }
- 
+
 TEST_F(NotationViewInputControllerTests, BrailleConfigurationMock_AdvanceCursorAfterDot_CanBeEnabled)
 {
     EXPECT_CALL(*m_brailleConfiguration, advanceCursorAfterDot())
-        .WillOnce(Return(true));
+    .WillOnce(Return(true));
     EXPECT_TRUE(m_brailleConfiguration->advanceCursorAfterDot());
 }
- 
+
 TEST_F(NotationViewInputControllerTests, NotationNoteInputMock_AdvanceCursor_IsCallable)
 {
     EXPECT_CALL(*m_noteInput, advanceCursor()).Times(1);

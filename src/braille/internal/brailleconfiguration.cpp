@@ -89,6 +89,7 @@ void BrailleConfiguration::setSixKeyInputEnabled(const bool enabled)
 {
     settings()->setSharedValue(BRAILLE_SIX_KEY_INPUT_ENABLED, Val(enabled));
 }
+
 muse::async::Notification BrailleConfiguration::advanceCursorAfterDotChanged() const
 {
     return m_advanceCursorAfterDotChanged;

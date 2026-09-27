@@ -961,6 +961,7 @@ void NotationNoteInput::notifyAboutStateChanged()
 {
     m_stateChanged.notify();
 }
+
 void NotationNoteInput::advanceCursor()
 {
     score()->inputState().moveToNextInputPos();

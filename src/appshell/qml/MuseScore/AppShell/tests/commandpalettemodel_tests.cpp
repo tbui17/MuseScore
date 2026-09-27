@@ -52,12 +52,12 @@ TEST_F(CommandPaletteModelTests, RunSelected_DefersDispatch)
 
     UiActionList actions = { action };
     EXPECT_CALL(m_uiActionsRegisterMock, actionList())
-        .WillOnce(Return(actions));
+    .WillOnce(Return(actions));
     EXPECT_CALL(m_uiActionsRegisterMock, actionState(action.code))
-        .WillOnce(Return(UiActionState::make_enabled()));
+    .WillOnce(Return(UiActionState::make_enabled()));
 
     EXPECT_CALL(m_configMock, commandPaletteRecentActions())
-        .WillOnce(Return(ActionCodeList()));
+    .WillOnce(Return(ActionCodeList()));
 
     m_model.load();
 
@@ -66,7 +66,7 @@ TEST_F(CommandPaletteModelTests, RunSelected_DefersDispatch)
     // fail the test. The expectation retires immediately (Times(0) is vacuously
     // satisfied), so the deferred call below won't match it.
     EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
-        .Times(0);
+    .Times(0);
 
     m_model.setSelectedIndex(0);
     bool result = m_model.runSelected();
@@ -77,7 +77,7 @@ TEST_F(CommandPaletteModelTests, RunSelected_DefersDispatch)
 
     // After processing deferred events, the QueuedConnection dispatch fires.
     EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
-        .Times(1);
+    .Times(1);
 
     QTest::qWait(10);
 }
@@ -106,12 +106,12 @@ TEST_F(CommandPaletteModelTests, RunSelected_DispatchSurvivesModelDestruction)
 
     UiActionList actions = { action };
     EXPECT_CALL(m_uiActionsRegisterMock, actionList())
-        .WillOnce(Return(actions));
+    .WillOnce(Return(actions));
     EXPECT_CALL(m_uiActionsRegisterMock, actionState(action.code))
-        .WillOnce(Return(UiActionState::make_enabled()));
+    .WillOnce(Return(UiActionState::make_enabled()));
 
     EXPECT_CALL(m_configMock, commandPaletteRecentActions())
-        .WillOnce(Return(ActionCodeList()));
+    .WillOnce(Return(ActionCodeList()));
 
     // Heap-allocate the model so we can destroy it mid-flight, exactly
     // like the dialog destroying its QML child. The mocks are injected
@@ -128,7 +128,7 @@ TEST_F(CommandPaletteModelTests, RunSelected_DispatchSurvivesModelDestruction)
     model->setSelectedIndex(0);
 
     EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
-        .Times(0);
+    .Times(0);
     bool result = model->runSelected();
     EXPECT_TRUE(result);
     testing::Mock::VerifyAndClearExpectations(&m_dispatcherMock);
@@ -140,7 +140,7 @@ TEST_F(CommandPaletteModelTests, RunSelected_DispatchSurvivesModelDestruction)
 
     // The dispatch must still fire despite the model being gone.
     EXPECT_CALL(m_dispatcherMock, dispatch(action.code))
-        .Times(1);
+    .Times(1);
     QTest::qWait(10);
 }
 
