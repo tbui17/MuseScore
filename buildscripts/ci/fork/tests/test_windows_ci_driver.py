@@ -6,7 +6,7 @@ The production build/metadata tail is exercised separately with bounded stubs.
 """
 import os
 from pathlib import Path
-import shutil
+import re
 import subprocess
 import tempfile
 import unittest
@@ -19,12 +19,13 @@ FIELDS = ("BUILD_NUMBER", "TARGET_PROCESSOR_BITS", "BUILD_WIN_PORTABLE",
           "BUILD_CRASHPAD_CLIENT", "CRASH_LOG_SERVER_URL")
 
 
-def run_cmd(script, args=(), *, cwd):
+def run_cmd(script, args=(), *, cwd, unquoted_options=False):
     # Test inputs are literal and always quoted for cmd, including empty values
     # and URL metacharacters. list2cmdline targets the C runtime, not cmd syntax.
     if any('"' in value for value in args):
         raise ValueError("This fixture does not accept embedded double quotes")
-    quoted_args = " ".join('"' + value + '"' for value in args)
+    quoted_args = " ".join(value if unquoted_options and re.fullmatch(r"--?[A-Za-z_]+", value)
+                           else '"' + value + '"' for value in args)
     command = f'"{COMSPEC}" /d /s /c ""{script}" {quoted_args}"'
     return subprocess.run(command, cwd=cwd, text=True, capture_output=True,
                           timeout=10, check=False)
@@ -32,7 +33,7 @@ def run_cmd(script, args=(), *, cwd):
 
 @unittest.skipUnless(WINDOWS_COMMANDS, "Native Windows cmd.exe is required")
 class WindowsParserTests(unittest.TestCase):
-    def parse(self, args, source=None):
+    def parse(self, args, source=None, *, unquoted_options=False):
         source = DRIVER.read_text() if source is None else source
         boundary = "SET /p BUILD_MODE="
         self.assertEqual(source.count(boundary), 1, "Driver parser boundary changed; update the fixture")
@@ -41,7 +42,7 @@ class WindowsParserTests(unittest.TestCase):
             script = Path(temp) / "parser fixture.bat"
             trailer = "\nECHO PARSER_REACHED_END\n" + "\n".join("SET " + key for key in FIELDS) + "\nEXIT /b 0\n"
             script.write_text(prefix + trailer, newline="\r\n")
-            result = run_cmd(script, args, cwd=temp)
+            result = run_cmd(script, args, cwd=temp, unquoted_options=unquoted_options)
         fields = {}
         for line in result.stdout.splitlines():
             key, sep, value = line.partition("=")
@@ -115,14 +116,16 @@ class WindowsParserTests(unittest.TestCase):
         self.assertEqual(fields["BUILD_WIN_PORTABLE"].upper(), "ON")
         self.assertEqual(fields["BUILD_CRASHPAD_CLIENT"], "OFF")
 
-    def test_negative_control_reproduces_old_unconditional_assignment(self):
-        # This is the exact old IF form: its second SET was not conditional.
+    def test_negative_control_reproduces_old_empty_url_activation(self):
+        # Use the old expression and the workflow's unquoted option name.
+        # Quoting it here would double-wrap %1 in the old expression and
+        # prevent the option comparison from matching at all.
         old = ('@echo off\nSET "BUILD_CRASHPAD_CLIENT=OFF"\n'
                'IF /I "%1" == "--crash_log_url" SET CRASH_LOG_SERVER_URL=%2 & SET BUILD_CRASHPAD_CLIENT=ON & SHIFT & SHIFT\n'
                'SET /p BUILD_MODE=unused\n')
-        result, fields = self.parse(["-n", "42"], source=old)
+        result, fields = self.parse(["--crash_log_url", ""], source=old, unquoted_options=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(fields["BUILD_CRASHPAD_CLIENT"], "ON")
+        self.assertEqual(fields["BUILD_CRASHPAD_CLIENT"].strip(), "ON")
 
 
 @unittest.skipUnless(WINDOWS_COMMANDS, "Native Windows cmd.exe is required")

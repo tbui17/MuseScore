@@ -10,8 +10,8 @@ SET "TARGET_PROCESSOR_BITS=64"
 SET "BUILD_CRASHPAD_CLIENT=OFF"
 SET "BUILD_WIN_PORTABLE=OFF"
 
-REM Each option consumes exactly one value. Commands after an ungrouped IF's
-REM ampersand are unconditional; keep all shifts and assignments in their branch.
+REM Each option consumes exactly one value. Keep optional feature activation
+REM separate from option presence: an empty crash-report URL must not enable it.
 :GETOPTS
 IF "%~1" == "" GOTO VALIDATE_OPTIONS
 IF /I "%~1" == "-n" GOTO NUMBER_OPTION
