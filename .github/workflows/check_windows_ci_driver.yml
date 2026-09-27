@@ -1,0 +1,36 @@
+name: 'Check: Windows CI driver'
+
+on:
+  pull_request:
+    paths:
+      - 'buildscripts/ci/windows/build.bat'
+      - 'buildscripts/ci/fork/tests/test_windows_ci_driver.py'
+      - '.github/workflows/check_windows_ci_driver.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native_driver_contracts:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Exercise native cmd parser and failure propagation
+        shell: python
+        run: |
+          import sys
+          import unittest
+
+          suite = unittest.defaultTestLoader.discover(
+              "buildscripts/ci/fork/tests", pattern="test_windows_ci_driver.py")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.testsRun == 0 or result.skipped or not result.wasSuccessful():
+              sys.exit(1)
