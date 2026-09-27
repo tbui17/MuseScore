@@ -47,6 +47,12 @@ export QT_QPA_PLATFORM=minimal:enable_fonts
 # if AddressSanitizer was used, disable leak detection
 export ASAN_OPTIONS=detect_leaks=0:new_delete_type_mismatch=0
 
+# Require this specific suite as well as a nonempty overall test list. UTEST
+# intentionally disables the full app shell, which previously hid these tests.
+# Running the small native suite explicitly also makes its result easy to find.
+mkdir -p test-results
+ctest --no-tests=error -R '^muse_appshell_qml_tests$' --output-junit test-results/palette.xml -V
+
 # --no-tests=error (CMake 3.20+) turns an empty test list into a failure, so a build that
 # produced no unit tests can never satisfy the mandatory unit gate.
-ctest --no-tests=error -V
+ctest --no-tests=error --output-junit test-results/all.xml -V
