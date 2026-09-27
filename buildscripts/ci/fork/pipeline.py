@@ -2,23 +2,35 @@
 """Trusted fork pipeline control. Never execute code from release artifacts."""
 import argparse
 import hashlib
+import http.client
+from email.utils import parsedate_to_datetime
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 REPOSITORY = "tbui17/MuseScore"
+COMMAND_TIMEOUT_SECONDS = 900
+API_MAX_ATTEMPTS = 4
+API_MAX_RETRY_DELAY_SECONDS = 30
+API_TRANSIENT_STATUSES = {500, 502, 503, 504}
 SHA = re.compile(r"[0-9a-f]{40}")
 TAG = re.compile(r"fork-[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[1-9][0-9]*")
 IDENTITIES = ("repository", "requested_source_ref", "source_sha", "framework_url", "framework_sha", "workflow_sha", "run_id", "run_attempt")
 
 
 def command(*args, cwd=None):
-    return subprocess.run(args, cwd=cwd, check=True, text=True, stdout=subprocess.PIPE).stdout.strip()
+    # A missing credential or stalled child must not consume the entire hosted job.
+    # Do not retry commands: this helper also performs non-idempotent release writes.
+    environment = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    return subprocess.run(args, cwd=cwd, check=True, text=True, stdout=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL, timeout=COMMAND_TIMEOUT_SECONDS,
+                          env=environment).stdout.strip()
 
 
 def api(path, method="GET", data=None, missing_ok=False):
@@ -30,13 +42,38 @@ def api(path, method="GET", data=None, missing_ok=False):
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request("https://api.github.com/" + path, headers=headers, method=method,
                                      data=None if data is None else json.dumps(data).encode())
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            return json.load(response)
-    except urllib.error.HTTPError as error:
-        if missing_ok and error.code == 404:
-            return None
-        raise RuntimeError(f"GitHub {method} {path}: HTTP {error.code}") from None
+    # A failed write may already have reached GitHub. Only reads can be replayed.
+    attempts = API_MAX_ATTEMPTS if method == "GET" else 1
+    for attempt in range(attempts):
+        delay = 2 ** attempt
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            try:
+                if missing_ok and method == "GET" and error.code == 404:
+                    return None
+                if error.code not in API_TRANSIENT_STATUSES or attempt + 1 == attempts:
+                    raise RuntimeError(f"GitHub {method} {path}: HTTP {error.code}") from None
+                retry_after = error.headers.get("Retry-After") if error.headers else None
+                if retry_after is not None:
+                    try:
+                        if retry_after.isascii() and retry_after.isdigit():
+                            requested_delay = int(retry_after)
+                        else:
+                            requested_delay = parsedate_to_datetime(retry_after).timestamp() - time.time()
+                        delay = max(delay, requested_delay)
+                    except (ValueError, TypeError, OverflowError):
+                        raise RuntimeError("Invalid GitHub Retry-After header; not retrying") from None
+                # Fail instead of retrying sooner than GitHub permits or sleeping unboundedly.
+                if delay > API_MAX_RETRY_DELAY_SECONDS:
+                    raise RuntimeError("GitHub Retry-After exceeds the bounded retry budget; retry the workflow later") from None
+            finally:
+                error.close()
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
+            if attempt + 1 == attempts:
+                raise RuntimeError(f"GitHub {method} {path}: transport failure ({type(error).__name__})") from None
+        time.sleep(delay)
 
 
 def valid_sha(value):
@@ -115,7 +152,7 @@ def preflight(args):
         if comparison["status"] not in ("ahead", "identical"):
             raise ValueError("Release source must be reviewed and merged into main first")
     source = args.source.resolve()
-    command("git", "clone", "--filter=blob:none", "--no-checkout", f"https://github.com/{repository}.git", str(source))
+    command("git", "clone", "--depth=1", "--filter=blob:none", "--no-checkout", f"https://github.com/{repository}.git", str(source))
     command("git", "fetch", "--depth=1", "origin", source_sha, cwd=source)
     command("git", "checkout", "--detach", source_sha, cwd=source)
     url, framework_sha = check_submodule(source, repository)

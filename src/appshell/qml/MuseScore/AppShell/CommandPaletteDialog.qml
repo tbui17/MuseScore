@@ -45,6 +45,16 @@ StyledDialogView {
         id: paletteModel
     }
 
+    // Search must remain navigable when the empty results list disables its panel.
+    NavigationPanel {
+        id: searchNavigation
+        name: "CommandPaletteSearch"
+        section: root.navigationSection
+        direction: NavigationPanel.Horizontal
+        order: 1
+        enabled: searchField.enabled && searchField.visible
+    }
+
     Column {
         id: contentColumn
 
@@ -59,7 +69,7 @@ StyledDialogView {
             hint: qsTrc("appshell/commandpalette", "Search commands")
             accessible.name: hint
 
-            navigation.panel: resultsList.navigation
+            navigation.panel: searchNavigation
             navigation.row: 0
             navigation.column: 0
 
@@ -117,7 +127,7 @@ StyledDialogView {
 
             navigation.section: root.navigationSection
             navigation.direction: NavigationPanel.Vertical
-            navigation.order: 1
+            navigation.order: 2
 
             delegate: ListItemBlank {
                 id: resultItem
@@ -134,6 +144,7 @@ StyledDialogView {
 
                 navigation.onActiveChanged: {
                     if (navigation.active) {
+                        paletteModel.selectedIndex = index
                         resultsList.positionViewAtIndex(index, ListView.Contain)
                     }
                 }

@@ -105,6 +105,11 @@ void CommandPaletteModel::moveSelection(int delta)
 {
     if (m_items.isEmpty()) {
         setSelectedIndex(-1);
+        // A static empty-state label is not spoken while search retains focus.
+        // Announce only on explicit navigation, never on every search keystroke.
+        if (accessibilityController()) {
+            accessibilityController()->announce(emptyStateText());
+        }
         return;
     }
 
