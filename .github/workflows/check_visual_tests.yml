@@ -3,6 +3,14 @@ name: 'Check: Visual Tests (vtest)'
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      reference_sha:
+        description: Full 40-character reference commit SHA (different from the selected candidate)
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }} ${{ github.event_name }} ${{ github.ref }}
@@ -11,17 +19,22 @@ concurrency:
 jobs:
   setup:
     name: "Setup VTests workflow"
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     outputs:
       do_run: ${{ steps.output_data.outputs.do_run }}
       reference_ref: ${{ steps.output_data.outputs.reference_ref }}
+      candidate_ref: ${{ steps.output_data.outputs.candidate_ref }}
       artifact_name: ${{ steps.output_data.outputs.artifact_name }}
     steps:
     - name: Clone repository
       uses: actions/checkout@v6
       with:
-        submodules: recursive
-        sparse-checkout: buildscripts/ci/tools/make_build_number.sh
+        ref: ${{ github.sha }}
+        persist-credentials: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: |
+          buildscripts/ci/tools/make_build_number.sh
+          buildscripts/ci/vtests/resolve_comparison.py
     - name: "Configure workflow"
       run: |
         bash ./buildscripts/ci/tools/make_build_number.sh
@@ -29,35 +42,9 @@ jobs:
 
         echo "BUILD_NUMBER=$BUILD_NUMBER" | tee -a $GITHUB_ENV
 
-    - name: Get reference commit for PR
-      if: github.event_name == 'pull_request'
-      env:
-        pull_request_title: ${{ github.event.pull_request.title }}
-        REFERENCE_REF: ${{ github.event.pull_request.base.ref }}
-      run: |
-        if [ -z "$REFERENCE_REF" ]; then DO_RUN='false'; else DO_RUN='true'; fi
-        echo "REFERENCE_REF=$REFERENCE_REF" >> $GITHUB_ENV
-        echo "DO_RUN=$DO_RUN" >> $GITHUB_ENV
-        echo "PR_INFO= ${{ github.event.pull_request.number }} ${pull_request_title}" >> $GITHUB_ENV
-    - name: Get reference commit for push commit
-      if: github.event_name == 'push'
-      run: |
-        REFERENCE_REF=${{ github.event.before }}
-        if [[ -z "$REFERENCE_REF" || "$REFERENCE_REF" == 0000000000000000000000000000000000000000 ]]; then
-          DO_RUN='false'
-        else
-          DO_RUN='true'
-        fi
-        echo "REFERENCE_REF=$REFERENCE_REF" >> $GITHUB_ENV
-        echo "DO_RUN=$DO_RUN" >> $GITHUB_ENV
-        echo "PR_INFO=" >> $GITHUB_ENV
     - id: output_data
-      name: Output workflow data
-      run: |
-        echo "do_run=${DO_RUN}" | tee -a $GITHUB_OUTPUT
-        echo "reference_ref=${REFERENCE_REF}" | tee -a $GITHUB_OUTPUT
-        UPLOAD_ARTIFACT_NAME="$(tr '":<>|*?/\\’' '_' <<<"VTests Comparison ${BUILD_NUMBER}${PR_INFO}")"
-        echo "artifact_name=$UPLOAD_ARTIFACT_NAME" | tee -a $GITHUB_OUTPUT
+      name: Validate and freeze comparison inputs
+      run: python3 ./buildscripts/ci/vtests/resolve_comparison.py
 
   build_current:
     name: "Build current"
@@ -68,6 +55,8 @@ jobs:
     - name: Clone repository
       uses: actions/checkout@v6
       with:
+        ref: ${{ needs.setup.outputs.candidate_ref }}
+        persist-credentials: false
         submodules: recursive
     - name: Restore ccache files
       id: restore-ccache
@@ -133,6 +122,7 @@ jobs:
       uses: actions/checkout@v6
       with:
         ref: ${{ needs.setup.outputs.reference_ref }}
+        persist-credentials: false
         submodules: recursive
     - name: Restore ccache files
       id: restore-ccache
@@ -196,6 +186,8 @@ jobs:
     - name: Clone repository
       uses: actions/checkout@v6
       with:
+        ref: ${{ needs.setup.outputs.candidate_ref }}
+        persist-credentials: false
         submodules: recursive
     - name: Download current
       uses: actions/download-artifact@v8
@@ -244,20 +236,9 @@ jobs:
     #     echo "Failure signal skipped because 'vtests' label is applied to the PR"
     #     export VTEST_DIFF_FOUND=false
     #     echo "VTEST_DIFF_FOUND=$VTEST_DIFF_FOUND" >> $GITHUB_ENV
-    - name: Emit failure signal for PR if differences are found
-      if: github.event_name == 'pull_request' && contains( env.VTEST_DIFF_FOUND, 'true')
+    - name: Emit failure signal if differences are found
+      if: contains( env.VTEST_DIFF_FOUND, 'true')
       run: |
         echo "This PR appears to change some of the visual tests."
         echo "Please carefully review the new visual test results in the uploaded artifact that can be found here: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         exit 1
-    - name: Comment push commit
-      if: github.event_name == 'push' && contains( env.VTEST_DIFF_FOUND, 'true')
-      uses: peter-evans/commit-comment@v4.0.0
-      with:
-        body: |
-          This is an automatic message. This commit appears to change some of the visual tests.
-          Please carefully review the new visual test results in the uploaded artifact that can be found
-          [here][1]
-
-          [1]: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        token: ${{ secrets.GITHUB_TOKEN }}
