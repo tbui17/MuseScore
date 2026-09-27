@@ -97,6 +97,12 @@ if (MUE_BUILD_APPSHELL_MODULE)
     endif()
 endif()
 
+# UTEST omits the full app shell, but its model tests must still run. The
+# QML module may already have registered the target in a full desktop build.
+if (MUSE_ENABLE_UNIT_TESTS AND MUSE_MODULE_UI AND NOT TARGET muse_appshell_qml_tests)
+    add_subdirectory(appshell/qml/MuseScore/AppShell/tests appshell-model-tests)
+endif()
+
 # App (main)
 add_subdirectory(app)
 if (MUE_CONFIGURATION_IS_APPWEB)

@@ -109,6 +109,18 @@ jobs:
       env:
         ASAN_OPTIONS: "detect_leaks=0"
 
+    - name: Upload unit-test reports and failure diagnostics
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: unit-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          build.debug/test-results/*.xml
+          build.debug/Testing/Temporary/LastTest.log
+          build.debug/Testing/Temporary/LastTestsFailed.log
+        if-no-files-found: warn
+        retention-days: 14
+
     - name: Code coverage
       if: ( github.event_name == 'schedule' || inputs.code_coverage ) && github.repository == 'musescore/MuseScore'
       run: |

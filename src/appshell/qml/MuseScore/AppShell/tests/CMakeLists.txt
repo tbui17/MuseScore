@@ -23,7 +23,9 @@ set(MODULE_TEST muse_appshell_qml_tests)
 set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/environment.cpp
     ${CMAKE_CURRENT_LIST_DIR}/commandpalettemodel_tests.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/commandpaletteaccessibility_tests.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../commandpalettemodel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../commandpalettemodel.h
 )
 
 set(MODULE_TEST_LINK
@@ -31,6 +33,7 @@ set(MODULE_TEST_LINK
     muse::ui
     muse::global
     Qt6::Test
+    Qt6::Qml
 )
 
 set(MODULE_TEST_DATA_ROOT ${CMAKE_CURRENT_LIST_DIR})
@@ -41,5 +44,6 @@ set(MODULE_TEST_INCLUDE
 )
 
 find_package(Qt6Test REQUIRED)
+find_package(Qt6Qml REQUIRED)
 
 include(SetupGTest)

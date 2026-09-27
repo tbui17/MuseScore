@@ -38,9 +38,9 @@ QVariant CommandPaletteModel::data(const QModelIndex& index, int role) const
     return QVariant();
 }
 
-int CommandPaletteModel::rowCount(const QModelIndex&) const
+int CommandPaletteModel::rowCount(const QModelIndex& parent) const
 {
-    return m_items.size();
+    return parent.isValid() ? 0 : static_cast<int>(m_items.size());
 }
 
 QHash<int, QByteArray> CommandPaletteModel::roleNames() const
@@ -119,10 +119,8 @@ void CommandPaletteModel::moveSelection(int delta)
 
     if (accessibilityController()) {
         const Item& item = m_items.at(nextIndex);
-        QString announcement = muse::qtrc("appshell/commandpalette", "%1, %2 of %3")
-            .arg(item.title)
-            .arg(nextIndex + 1)
-            .arg(m_items.size());
+        QString announcement = muse::qtrc("appshell/commandpalette", "%1, %2 of %3");
+        announcement = announcement.arg(item.title).arg(nextIndex + 1).arg(m_items.size());
         accessibilityController()->announce(announcement);
     }
 }
