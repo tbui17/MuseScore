@@ -6364,13 +6364,13 @@ bool NotationInteraction::setTempoAtCurrentPosition(int bpm)
 
     // Check for an existing TempoText on this segment (tempo text is always track 0)
     TempoText* existingTempo = segment
-        ? toTempoText(segment->findAnnotation(ElementType::TEMPO_TEXT, 0, 0))
-        : nullptr;
+                               ? toTempoText(segment->findAnnotation(ElementType::TEMPO_TEXT, 0, 0))
+                               : nullptr;
 
     if (existingTempo) {
         // Update existing tempo text's BPM instead of creating a duplicate
         String xmlText = existingTempo->xmlText();
-       static const std::regex bpmRegex(R"(\s*=\s*\d+([.]\d+)?)");
+        static const std::regex bpmRegex(R"(\s*=\s*\d+([.]\d+)?)");
         std::string replaced = std::regex_replace(xmlText.toStdString(), bpmRegex,
                                                   " = " + std::to_string(bpm));
         // undoChangeProperty 2-arg form is public on EngravingObject; the 3-arg override
@@ -6380,9 +6380,9 @@ bool NotationInteraction::setTempoAtCurrentPosition(int bpm)
         if (!existingTempo->followText()) {
             existingTempo->updateTempo();
         }
-       apply();
+        apply();
         showItem(existingTempo);
-       return true;
+        return true;
     }
 
     TextBase* text = score()->addText(TextStyleType::TEMPO, item);

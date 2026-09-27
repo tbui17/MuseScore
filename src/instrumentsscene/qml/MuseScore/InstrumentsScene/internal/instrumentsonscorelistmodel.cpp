@@ -237,10 +237,10 @@ void InstrumentsOnScoreListModel::addInstruments(const QStringList& instrumentId
 
         if (totalCount == 1) {
             announcement = muse::qtrc("instruments", "%1 added, 1 instrument in score")
-                               .arg(namesStr);
+                           .arg(namesStr);
         } else {
             announcement = muse::qtrc("instruments", "%1 added, %n instruments in score", "", totalCount)
-                               .arg(namesStr);
+                           .arg(namesStr);
         }
 
         accessibilityController()->announce(announcement);
@@ -267,13 +267,13 @@ void InstrumentsOnScoreListModel::removeSelectionWithAnnouncement()
 
         if (remainingCount == 0) {
             announcement = muse::qtrc("instruments", "%1 removed, score has no instruments")
-                               .arg(namesStr);
+                           .arg(namesStr);
         } else if (remainingCount == 1) {
             announcement = muse::qtrc("instruments", "%1 removed, 1 instrument in score")
-                               .arg(namesStr);
+                           .arg(namesStr);
         } else {
             announcement = muse::qtrc("instruments", "%1 removed, %n instruments in score", "", remainingCount)
-                               .arg(namesStr);
+                           .arg(namesStr);
         }
 
         accessibilityController()->announce(announcement);

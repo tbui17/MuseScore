@@ -1898,7 +1898,8 @@ EngravingItem* NotationActionController::tempoTargetItem() const
     const INotationSelectionPtr sel = interaction->selection();
     if (sel && sel->isRange()) {
         const INotationSelectionRangePtr range = sel->range();
-        return range && range->rangeStartSegment() ? range->rangeStartSegment()->firstElementForNavigation(range->startStaffIndex()) : nullptr;
+        return range
+               && range->rangeStartSegment() ? range->rangeStartSegment()->firstElementForNavigation(range->startStaffIndex()) : nullptr;
     }
 
     return interaction->contextItem();
@@ -1930,6 +1931,7 @@ bool NotationActionController::currentTempoTick(Fraction& tick) const
     tick = item->tick();
     return true;
 }
+
 int NotationActionController::currentTempoBpm() const
 {
     mu::engraving::Score* score = currentNotationScore();
